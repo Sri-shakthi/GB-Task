@@ -35,6 +35,12 @@ function runFfmpeg(args) {
 }
 
 const server = createServer(async (request, response) => {
+  if (request.method === "GET" && request.url === "/health") {
+    response
+      .writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
+      .end('{"ok":true}');
+    return;
+  }
   if (request.method !== "POST") {
     response.writeHead(405, { allow: "POST" }).end();
     return;
