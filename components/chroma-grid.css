@@ -1,0 +1,202 @@
+.chroma-grid {
+  --x: 50%;
+  --y: 50%;
+  --r: 260px;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.chroma-card {
+  --mouse-x: 50%;
+  --mouse-y: 50%;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #ddd4c3;
+  border-radius: 18px;
+  background: linear-gradient(
+    145deg,
+    #fffdf8 45%,
+    color-mix(in srgb, var(--card-accent) 15%, #fff)
+  );
+  box-shadow: 0 10px 30px rgba(47, 74, 53, 0.07);
+  transition:
+    transform 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+.chroma-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--card-accent);
+  box-shadow: 0 16px 38px rgba(47, 74, 53, 0.12);
+}
+.chroma-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    circle at var(--mouse-x) var(--mouse-y),
+    rgba(255, 255, 255, 0.75),
+    transparent 46%
+  );
+  transition: opacity 0.3s ease;
+}
+.chroma-card:hover::before {
+  opacity: 1;
+}
+.chroma-photo {
+  position: relative;
+  height: 210px;
+  margin: 10px 10px 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 12px;
+  background: linear-gradient(145deg, var(--green-pale), #eadfc8);
+  color: var(--green);
+  font:
+    600 42px Lora,
+    Georgia,
+    serif;
+}
+.chroma-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.staff-id {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(20, 43, 27, 0.82);
+  color: #fff;
+  font:
+    700 10px Inter,
+    sans-serif;
+  letter-spacing: 0.06em;
+}
+.chroma-info {
+  position: relative;
+  z-index: 1;
+  padding: 16px 18px 18px;
+}
+.chroma-info > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+.chroma-info h3 {
+  margin: 0;
+  font:
+    600 20px Lora,
+    Georgia,
+    serif;
+  color: var(--green);
+}
+.chroma-info p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.category-pill {
+  display: inline-flex;
+  margin-top: 9px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--green-pale);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+}
+.staff-contact {
+  display: grid !important;
+  gap: 7px !important;
+  margin-top: 14px;
+}
+.staff-contact span {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: #554f45;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.staff-contact svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--card-accent);
+}
+.staff-contact .optional-empty {
+  color: #928b80;
+}
+.chroma-overlay,
+.chroma-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  backdrop-filter: grayscale(0.85) brightness(0.9);
+  -webkit-backdrop-filter: grayscale(0.85) brightness(0.9);
+  background: rgba(255, 255, 255, 0.001);
+}
+.chroma-overlay {
+  mask-image: radial-gradient(
+    circle var(--r) at var(--x) var(--y),
+    transparent 0 20%,
+    rgba(0, 0, 0, 0.18) 48%,
+    white 100%
+  );
+  -webkit-mask-image: radial-gradient(
+    circle var(--r) at var(--x) var(--y),
+    transparent 0 20%,
+    rgba(0, 0, 0, 0.18) 48%,
+    white 100%
+  );
+}
+.chroma-fade {
+  opacity: 1;
+  mask-image: radial-gradient(
+    circle var(--r) at var(--x) var(--y),
+    white 0 20%,
+    rgba(255, 255, 255, 0.72) 48%,
+    transparent 100%
+  );
+  -webkit-mask-image: radial-gradient(
+    circle var(--r) at var(--x) var(--y),
+    white 0 20%,
+    rgba(255, 255, 255, 0.72) 48%,
+    transparent 100%
+  );
+}
+@media (max-width: 760px) {
+  .chroma-grid {
+    grid-template-columns: 1fr;
+  }
+  .chroma-photo {
+    height: 190px;
+  }
+  .chroma-overlay,
+  .chroma-fade {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chroma-card {
+    transition: none;
+  }
+  .chroma-card:hover {
+    transform: none;
+  }
+  .chroma-overlay,
+  .chroma-fade {
+    display: none;
+  }
+}

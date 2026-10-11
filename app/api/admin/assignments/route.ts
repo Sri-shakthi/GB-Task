@@ -1,0 +1,176 @@
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
+import { getOwnerSession } from "@/lib/auth";
+import { getDb } from "@/db";
+import {
+  assignmentEvents,
+  assignments,
+  departments,
+  jobs,
+  mediaAssets,
+  staff,
+  whatsappMessages,
+} from "@/db/schema";
+
+export async function GET() {
+  const session = await getOwnerSession();
+  if (!session)
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const db = getDb();
+  const rows = await db
+    .select({
+      assignment: assignments,
+      person: staff,
+      department: departments.name,
+    })
+    .from(assignments)
+    .innerJoin(staff, eq(assignments.assigneeId, staff.id))
+    .leftJoin(departments, eq(assignments.departmentId, departments.id))
+    .where(eq(assignments.restaurantId, session.restaurantId))
+    .orderBy(desc(assignments.dueAt))
+    .limit(200);
+  const ids = rows.map((row) => row.assignment.id);
+  const messages = ids.length
+    ? await db
+        .select()
+        .from(whatsappMessages)
+        .where(inArray(whatsappMessages.assignmentId, ids))
+        .orderBy(desc(whatsappMessages.updatedAt))
+    : [];
+  const events = ids.length
+    ? await db
+        .select()
+        .from(assignmentEvents)
+        .where(inArray(assignmentEvents.assignmentId, ids))
+        .orderBy(desc(assignmentEvents.createdAt))
+    : [];
+  const latestMessage = new Map<string, (typeof messages)[number]>();
+  for (const message of messages)
+    if (message.assignmentId && !latestMessage.has(message.assignmentId))
+      latestMessage.set(message.assignmentId, message);
+  const latestResponse = new Map<string, (typeof events)[number]>();
+  for (const event of events)
+    if (
+      event.type.startsWith("whatsapp_") &&
+      !latestResponse.has(event.assignmentId)
+    )
+      latestResponse.set(event.assignmentId, event);
+  return Response.json({
+    assignments: rows.map(({ assignment, person, department }) => ({
+      id: assignment.id,
+      name: person.name,
+      initials: person.name
+        .split(/\s+/)
+        .map((part) => part[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase(),
+      title: assignment.title || "Voice instructions",
+      department: department || "Other",
+      dueAt: assignment.dueAt.toISOString(),
+      status: assignment.status,
+      instructions: assignment.instructions,
+      hasRecording: Boolean(assignment.recordingId),
+      deliveryStatus: latestMessage.get(assignment.id)?.status || "queued",
+      deliveryUpdatedAt:
+        latestMessage.get(assignment.id)?.updatedAt.toISOString() || null,
+      staffResponse: latestResponse.get(assignment.id)?.type || null,
+    })),
+  });
+}
+const input = z
+  .object({
+    staffId: z.string().uuid(),
+    departmentId: z.string().uuid().optional(),
+    dueAt: z.coerce.date(),
+    priority: z.enum(["low", "normal", "high"]).default("normal"),
+    title: z.string().trim().max(240).optional(),
+    instructions: z.string().trim().max(4000).optional(),
+    recordingId: z.string().uuid().optional(),
+  })
+  .refine(
+    (v) =>
+      v.dueAt.getTime() > Date.now() &&
+      Boolean(v.title || v.instructions || v.recordingId),
+  );
+export async function POST(request: Request) {
+  const session = await getOwnerSession();
+  if (!session)
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const parsed = input.safeParse(await request.json().catch(() => null));
+  if (!parsed.success)
+    return Response.json(
+      { error: "Invalid assignment", details: parsed.error.flatten() },
+      { status: 400 },
+    );
+  const db = getDb(),
+    [person] = await db
+      .select()
+      .from(staff)
+      .where(
+        and(
+          eq(staff.id, parsed.data.staffId),
+          eq(staff.restaurantId, session.restaurantId),
+          eq(staff.active, true),
+        ),
+      )
+      .limit(1);
+  if (!person)
+    return Response.json(
+      { error: "Active staff member not found" },
+      { status: 404 },
+    );
+  let recordingPath: string | undefined;
+  if (parsed.data.recordingId) {
+    const [media] = await db
+      .select()
+      .from(mediaAssets)
+      .where(
+        and(
+          eq(mediaAssets.id, parsed.data.recordingId),
+          eq(mediaAssets.restaurantId, session.restaurantId),
+          eq(mediaAssets.kind, "voice_recording"),
+        ),
+      )
+      .limit(1);
+    if (!media?.blobUrl)
+      return Response.json({ error: "Recording not found" }, { status: 404 });
+    recordingPath = media.blobUrl;
+  }
+  const created = await db.transaction(async (tx) => {
+    const [assignment] = await tx
+      .insert(assignments)
+      .values({
+        restaurantId: session.restaurantId,
+        assigneeId: person.id,
+        departmentId: parsed.data.departmentId,
+        title: parsed.data.title,
+        instructions: parsed.data.instructions,
+        recordingId: parsed.data.recordingId,
+        status: "assigned",
+        priority: parsed.data.priority,
+        dueAt: parsed.data.dueAt,
+      })
+      .returning();
+    await tx
+      .insert(assignmentEvents)
+      .values({
+        assignmentId: assignment.id,
+        actor: `owner:${session.ownerId}`,
+        type: "assigned",
+      });
+    await tx
+      .insert(jobs)
+      .values({
+        restaurantId: session.restaurantId,
+        assignmentId: assignment.id,
+        // The worker converts each recording to a template-compatible MP4,
+        // uploads it to Meta once, then sends the resulting media ID.
+        type: recordingPath ? "prepare_video" : "send_whatsapp",
+        payload: { recordingPath, recordingId: parsed.data.recordingId, title: assignment.title },
+        status: "pending",
+      });
+    return assignment;
+  });
+  return Response.json({ assignment: created }, { status: 201 });
+}

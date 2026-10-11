@@ -1,0 +1,42 @@
+{
+  "name": "gb-tasks",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "auth:hash": "node scripts/hash-password.mjs",
+    "auth:create-owner": "node --env-file=.env scripts/create-owner.mjs",
+    "auth:enable-mfa": "node --env-file=.env scripts/enable-mfa.mjs",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@fontsource/inter": "5.3.0",
+    "@fontsource/lora": "5.3.0",
+    "@neon/config": "^1.8.3",
+    "@neon/env": "^1.5.0",
+    "@neondatabase/auth": "^0.5.0-beta",
+    "@neondatabase/serverless": "^1.0.2",
+    "@vercel/blob": "^2.8.0",
+    "drizzle-orm": "^0.45.3",
+    "gsap": "^3.15.0",
+    "lucide-react": "^0.468.0",
+    "next": "^16.3.8",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.12",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.6",
+    "@types/react-dom": "^19.0.2",
+    "drizzle-kit": "^0.31.4",
+    "prettier": "^3.9.9",
+    "tailwindcss": "^4.1.12",
+    "typescript": "^5.7.2"
+  }
+}

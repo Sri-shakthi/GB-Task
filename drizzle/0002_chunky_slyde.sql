@@ -1,0 +1,1 @@
+ALTER TABLE "assignment_events" ALTER COLUMN "actor" SET DATA TYPE varchar(64);
