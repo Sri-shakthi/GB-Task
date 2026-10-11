@@ -20,6 +20,27 @@ MEDIA_PROCESSOR_SECRET=the-same-long-random-secret
 
 Use HTTPS and keep the processor URL private behind a firewall, reverse proxy, or platform authentication. The shared secret is mandatory and prevents unauthorised conversion requests.
 
+## Railway retry scheduler
+
+The Vercel app starts delivery immediately after an assignment is created. For
+durable retries, create a second Railway service from this same repository with
+the same root directory, then set its start command to:
+
+```bash
+node src/run-job-worker.mjs
+```
+
+Set its cron schedule to `*/5 * * * *` and give that service these variables:
+
+```env
+JOB_WORKER_URL=https://YOUR-VERCEL-DOMAIN/api/cron/jobs
+CRON_SECRET=the-same-value-as-in-Vercel
+```
+
+The scheduler exits after each call. Railway Hobby cron jobs run no more often
+than every five minutes; this is only a retry fallback, not the normal delivery
+path.
+
 ## Production on an Oracle VM
 
 Use `docker-compose.yml` with Caddy to run the processor behind HTTPS. Copy

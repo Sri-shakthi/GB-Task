@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { after } from "next/server";
 import { z } from "zod";
 import { getOwnerSession } from "@/lib/auth";
 import { getDb } from "@/db";
@@ -11,6 +12,7 @@ import {
   staff,
   whatsappMessages,
 } from "@/db/schema";
+import { processDueJobs } from "@/lib/job-worker";
 
 export async function GET() {
   const session = await getOwnerSession();
@@ -171,6 +173,16 @@ export async function POST(request: Request) {
         status: "pending",
       });
     return assignment;
+  });
+  // Start delivery as soon as the assignment response has been returned. The
+  // scheduled worker remains the durable retry path if this background run is
+  // interrupted by a serverless instance shutdown.
+  after(async () => {
+    try {
+      await processDueJobs(1);
+    } catch (error) {
+      console.error("Immediate assignment delivery failed", error);
+    }
   });
   return Response.json({ assignment: created }, { status: 201 });
 }
