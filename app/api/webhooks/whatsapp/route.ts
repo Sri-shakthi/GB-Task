@@ -112,7 +112,10 @@ async function processReply(message: any) {
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "_")
-        .replace(/^_+|_+$/g, "");
+        .replace(/^_+|_+$/g, "")
+        // WhatsApp Flows may prefix option values with their list position,
+        // for example `1_No` or `2_Need help`.
+        .replace(/^\d+_/, "");
       action = [
         "yes",
         "completed",
