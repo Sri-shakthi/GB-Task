@@ -111,17 +111,42 @@ async function processReply(message: any) {
       )
         .trim()
         .toLowerCase()
-        .replace(/\s+/g, "_");
-      action =
-        ["yes", "completed", "complete", "done"].includes(answer)
-          ? "complete"
-          : ["no", "not_completed", "not_complete", "not_yet"].includes(
-                answer,
-              )
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+      action = [
+        "yes",
+        "completed",
+        "complete",
+        "done",
+        "i_m_done",
+        "im_done",
+      ].includes(answer)
+        ? "complete"
+        : [
+              "doing",
+              "in_progress",
+              "i_am_doing_it",
+              "i_m_doing_it",
+              "im_doing_it",
+              "started",
+            ].includes(answer)
+          ? "start"
+          : [
+                "no",
+                "not_completed",
+                "not_complete",
+                "not_yet",
+                "not_started",
+                "not_started_yet",
+              ].includes(answer)
             ? "not_yet"
-            : ["accept", "accepted"].includes(answer)
-              ? "accept"
-              : undefined;
+            : ["need_help", "help", "needs_help", "help_needed"].includes(
+                  answer,
+                )
+              ? "help"
+              : ["accept", "accepted"].includes(answer)
+                ? "accept"
+                : undefined;
     } catch {
       return;
     }
@@ -160,9 +185,11 @@ async function processReply(message: any) {
       const next =
         action === "accept"
           ? "accepted"
-          : action === "complete"
-            ? "completed"
-            : "declined";
+          : action === "start"
+            ? "in_progress"
+            : action === "complete"
+              ? "completed"
+              : "declined";
       await tx
         .update(assignments)
         .set({ status: next, updatedAt: new Date() })
