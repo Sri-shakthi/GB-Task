@@ -29,10 +29,12 @@ type Task = {
   title: string;
   department: string;
   due: string;
+  assignedAt: string;
   status: Status;
   delivery: string;
   instructions: string | null;
   hasRecording: boolean;
+  hasVideo: boolean;
 };
 type Staff = {
   id: number | string;
@@ -69,9 +71,11 @@ function taskFromApi(task: {
   title: string;
   department: string;
   dueAt: string;
+  assignedAt: string;
   status: string;
   instructions: string | null;
   hasRecording: boolean;
+  hasVideo: boolean;
   deliveryStatus: string;
   deliveryUpdatedAt: string | null;
   staffResponse: string | null;
@@ -103,10 +107,12 @@ function taskFromApi(task: {
       hour: "numeric",
       minute: "2-digit",
     }),
+    assignedAt: task.assignedAt,
     status,
     delivery: `${deliveryStatus[0]?.toUpperCase() || ""}${deliveryStatus.slice(1)}${deliveryTime}`,
     instructions: task.instructions,
     hasRecording: task.hasRecording,
+    hasVideo: task.hasVideo,
   };
 }
 export default function Dashboard({
@@ -125,16 +131,25 @@ export default function Dashboard({
     [staffOpen, setStaffOpen] = useState(false),
     [selectedTask, setSelectedTask] = useState<Task | null>(null),
     [toast, setToast] = useState("");
-  const visible = useMemo(
-    () =>
-      filter === "All" ? tasks : tasks.filter((t) => t.department === filter),
-    [filter, tasks],
-  );
+  const todayTasks = useMemo(() => {
+      const today = new Date().toLocaleDateString("en-CA");
+      return tasks.filter(
+        (task) =>
+          new Date(task.assignedAt).toLocaleDateString("en-CA") === today,
+      );
+    }, [tasks]),
+    visible = useMemo(
+      () =>
+        filter === "All"
+          ? todayTasks
+          : todayTasks.filter((task) => task.department === filter),
+      [filter, todayTasks],
+    );
   const counts = {
-    pending: tasks.filter((t) => t.status === "Pending").length,
-    progress: tasks.filter((t) => t.status === "In progress").length,
-    done: tasks.filter((t) => t.status === "Completed").length,
-    attention: tasks.filter(
+    pending: todayTasks.filter((t) => t.status === "Pending").length,
+    progress: todayTasks.filter((t) => t.status === "In progress").length,
+    done: todayTasks.filter((t) => t.status === "Completed").length,
+    attention: todayTasks.filter(
       (t) => t.status === "Needs attention" || t.status === "Not completed",
     ).length,
   };
@@ -554,50 +569,71 @@ function HistoryPage({
   tasks: Task[];
   onOpenTask: (task: Task) => void;
 }) {
+  const grouped = useMemo(() => {
+    const weeks = new Map<string, Map<string, Task[]>>();
+    for (const task of tasks) {
+      const date = new Date(task.assignedAt),
+        monday = new Date(date);
+      monday.setHours(0, 0, 0, 0);
+      monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+      const week = `Week of ${monday.toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+        })}`,
+        day = date.toLocaleDateString("en-IN", {
+          weekday: "long",
+          day: "numeric",
+          month: "short",
+        });
+      if (!weeks.has(week)) weeks.set(week, new Map());
+      const days = weeks.get(week)!;
+      days.set(day, [...(days.get(day) || []), task]);
+    }
+    return weeks;
+  }, [tasks]);
   return (
     <section>
-      <div className="history-filters card">
-        <label>
-          From
-          <input type="date" />
-        </label>
-        <label>
-          To
-          <input type="date" />
-        </label>
-        <button className="btn btn-secondary">This week</button>
-      </div>
       <div className="section-title page-section">
-        <h2>Recent assignments</h2>
-        <span className="link">Newest first</span>
+        <h2>Last 8 days</h2>
+        <span className="link">Grouped by week and date</span>
       </div>
-      <div className="history-list card">
-        {tasks.length ? (
-          tasks.map((t) => (
-            <button
-              className="history-row"
-              key={t.id}
-              type="button"
-              onClick={() => onOpenTask(t)}
-            >
-              <div className="person-avatar">{t.initials}</div>
-              <div>
-                <strong>{t.title}</strong>
-                <p>
-                  {t.name} · {t.department} · Due {t.due}
-                </p>
+      {tasks.length ? (
+        [...grouped].map(([week, days]) => (
+          <div key={week} className="history-list card">
+            <h3>{week}</h3>
+            {[...days].map(([day, dayTasks]) => (
+              <div key={day}>
+                <p className="meta">{day}</p>
+                {dayTasks.map((t) => (
+                  <button
+                    className="history-row"
+                    key={t.id}
+                    type="button"
+                    onClick={() => onOpenTask(t)}
+                  >
+                    <div className="person-avatar">{t.initials}</div>
+                    <div>
+                      <strong>{t.title}</strong>
+                      <p>
+                        {t.name} · {t.department} · Due {t.due}
+                      </p>
+                    </div>
+                    <span
+                      className={`status ${t.status === "Completed" ? "complete" : t.status === "In progress" ? "progress" : t.status === "Not completed" || t.status === "Needs attention" ? "attention" : "pending"}`}
+                    >
+                      {t.status}
+                    </span>
+                  </button>
+                ))}
               </div>
-              <span
-                className={`status ${t.status === "Completed" ? "complete" : t.status === "In progress" ? "progress" : t.status === "Not completed" || t.status === "Needs attention" ? "attention" : "pending"}`}
-              >
-                {t.status}
-              </span>
-            </button>
-          ))
-        ) : (
-          <div className="empty">No assignments have been recorded yet.</div>
-        )}
-      </div>
+            ))}
+          </div>
+        ))
+      ) : (
+        <div className="history-list card empty">
+          No assignments have been recorded yet.
+        </div>
+      )}
     </section>
   );
 }
@@ -887,7 +923,12 @@ function TaskDetailsSheet({
   onClose: () => void;
 }) {
   return (
-    <Sheet title={task.title} eyebrow="ASSIGNMENT DETAILS" onClose={onClose}>
+    <Sheet
+      title={task.title}
+      eyebrow="ASSIGNMENT DETAILS"
+      onClose={onClose}
+      compact
+    >
       <div className="form task-details">
         <div className="card task-detail-status">
           <span className="meta">Task status</span>
@@ -896,7 +937,9 @@ function TaskDetailsSheet({
         </div>
         <div className="field">
           <label>Assigned to</label>
-          <p>{task.name} · {task.department}</p>
+          <p>
+            {task.name} · {task.department}
+          </p>
         </div>
         <div className="field">
           <label>Due</label>
@@ -911,8 +954,28 @@ function TaskDetailsSheet({
         {task.hasRecording && (
           <p className="meta">Voice instructions are attached to this task.</p>
         )}
+        {(task.hasRecording || task.hasVideo) && <TaskVideo taskId={task.id} />}
       </div>
     </Sheet>
+  );
+}
+function TaskVideo({ taskId }: { taskId: Task["id"] }) {
+  const [unavailable, setUnavailable] = useState(false);
+  if (unavailable)
+    return (
+      <p className="meta">
+        This video is still being prepared or is unavailable for this earlier
+        task.
+      </p>
+    );
+  return (
+    <video
+      controls
+      playsInline
+      preload="metadata"
+      src={`/api/admin/assignments/${taskId}/video`}
+      onError={() => setUnavailable(true)}
+    />
   );
 }
 function Alert({ title, detail }: { title: string; detail: string }) {
@@ -1031,7 +1094,43 @@ function AssignSheet({
   onClose: () => void;
   onSubmit: (t: Task) => void;
 }) {
-  const [recording, setRecording] = useState(false),
+  const assignableDepartments = useMemo(
+      () => departments.filter((department) => department !== "All"),
+      [departments],
+    ),
+    defaultDepartment =
+      assignableDepartments.find(
+        (department) => department.toLowerCase() === "kitchen",
+      ) ||
+      assignableDepartments[0] ||
+      "",
+    [selectedDepartment, setSelectedDepartment] = useState(defaultDepartment),
+    filteredStaff = useMemo(
+      () =>
+        staff.filter(
+          (person) =>
+            person.department.toLowerCase() ===
+            selectedDepartment.toLowerCase(),
+        ),
+      [selectedDepartment, staff],
+    ),
+    [selectedStaffId, setSelectedStaffId] = useState(
+      String(
+        staff.find(
+          (person) =>
+            person.department.toLowerCase() === defaultDepartment.toLowerCase(),
+        )?.id || "",
+      ),
+    ),
+    defaultDue = useMemo(() => {
+      const due = new Date(Date.now() + 3 * 60 * 60 * 1000),
+        local = new Date(due.getTime() - due.getTimezoneOffset() * 60_000);
+      return {
+        date: local.toISOString().slice(0, 10),
+        time: local.toISOString().slice(11, 16),
+      };
+    }, []),
+    [recording, setRecording] = useState(false),
     [seconds, setSeconds] = useState(0),
     [audio, setAudio] = useState<string | null>(null),
     [audioBlob, setAudioBlob] = useState<Blob | null>(null),
@@ -1040,6 +1139,14 @@ function AssignSheet({
   const timer = useRef<ReturnType<typeof setInterval> | null>(null),
     recorder = useRef<MediaRecorder | null>(null),
     chunks = useRef<Blob[]>([]);
+  useEffect(() => {
+    if (!assignableDepartments.includes(selectedDepartment))
+      setSelectedDepartment(defaultDepartment);
+  }, [assignableDepartments, defaultDepartment, selectedDepartment]);
+  useEffect(() => {
+    if (!filteredStaff.some((person) => String(person.id) === selectedStaffId))
+      setSelectedStaffId(String(filteredStaff[0]?.id || ""));
+  }, [filteredStaff, selectedStaffId]);
   async function toggle() {
     if (recording) {
       recorder.current?.stop();
@@ -1053,9 +1160,7 @@ function AssignSheet({
       );
       if (!mimeType) {
         stream.getTracks().forEach((t) => t.stop());
-        setError(
-          "This browser cannot record audio in a supported format.",
-        );
+        setError("This browser cannot record audio in a supported format.");
         return;
       }
       const r = new MediaRecorder(stream, { mimeType });
@@ -1149,10 +1254,12 @@ function AssignSheet({
         hour: "numeric",
         minute: "2-digit",
       }),
+      assignedAt: new Date().toISOString(),
       status: "Pending",
       delivery: audio ? "Preparing video" : "Queued",
       instructions: null,
       hasRecording: Boolean(audioBlob),
+      hasVideo: false,
     });
   }
   return (
@@ -1161,16 +1268,28 @@ function AssignSheet({
         <div className="row">
           <div className="field">
             <label>Department</label>
-            <select name="department">
-              {departments.map((d) => (
+            <select
+              name="department"
+              value={selectedDepartment}
+              onChange={(event) => setSelectedDepartment(event.target.value)}
+            >
+              {assignableDepartments.map((d) => (
                 <option key={d}>{d}</option>
               ))}
             </select>
           </div>
           <div className="field">
             <label>Staff member</label>
-            <select name="staff">
-              {staff.map((s) => (
+            <select
+              name="staff"
+              value={selectedStaffId}
+              onChange={(event) => setSelectedStaffId(event.target.value)}
+              disabled={!filteredStaff.length}
+            >
+              {!filteredStaff.length && (
+                <option value="">No staff in this department</option>
+              )}
+              {filteredStaff.map((s) => (
                 <option key={s.id} value={String(s.id)}>
                   {s.name}
                 </option>
@@ -1184,15 +1303,18 @@ function AssignSheet({
             <input
               type="date"
               name="date"
-              defaultValue={new Date(Date.now() + 86_400_000)
-                .toISOString()
-                .slice(0, 10)}
+              defaultValue={defaultDue.date}
               required
             />
           </div>
           <div className="field">
             <label>Due time</label>
-            <input type="time" name="time" defaultValue="16:30" required />
+            <input
+              type="time"
+              name="time"
+              defaultValue={defaultDue.time}
+              required
+            />
           </div>
         </div>
         <div className="field">
@@ -1263,7 +1385,10 @@ function AssignSheet({
           </label>
           {error && <div className="error-text">{error}</div>}
         </div>
-        <button className="btn btn-primary submit" disabled={busy}>
+        <button
+          className="btn btn-primary submit"
+          disabled={busy || !filteredStaff.length}
+        >
           {busy ? "Uploading & assigning…" : "Assign & send"}{" "}
           <ChevronRight size={18} />
         </button>
@@ -1276,15 +1401,17 @@ function Sheet({
   eyebrow,
   onClose,
   children,
+  compact = false,
 }: {
   title: string;
   eyebrow: string;
   onClose: () => void;
   children: React.ReactNode;
+  compact?: boolean;
 }) {
   return (
     <div className="modal-bg" role="dialog" aria-modal="true">
-      <section className="sheet">
+      <section className={`sheet${compact ? " sheet-compact" : ""}`}>
         <div className="sheet-head">
           <div>
             <div className="eyebrow">{eyebrow}</div>
@@ -1294,7 +1421,7 @@ function Sheet({
             <X size={20} />
           </button>
         </div>
-        {children}
+        <div className="sheet-body">{children}</div>
       </section>
     </div>
   );

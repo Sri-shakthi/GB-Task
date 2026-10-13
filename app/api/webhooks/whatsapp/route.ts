@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   assignments,
@@ -83,7 +83,6 @@ export async function POST(request: Request) {
 }
 async function processReply(message: any) {
   const contextId = message.context?.id;
-  if (!contextId) return;
   const quickReply =
     /^task:([0-9a-f-]{36}):(accept|complete|help|decline)$/.exec(
       message.interactive?.button_reply?.id || "",
@@ -155,16 +154,36 @@ async function processReply(message: any) {
     }
   }
   if (!assignmentId || !action || !/^[0-9a-f-]{36}$/.test(assignmentId)) return;
-  const db = getDb(),
+  // A Flow reply is authenticated by Meta's webhook signature and carries the
+  // assignment in its flow_token. Some Flow replies omit context.id or return
+  // a context that differs from the original template message, so fall back to
+  // the latest outbound message for that assignment. The staff phone is still
+  // verified below before any task is changed.
+  const db = getDb();
+  let [outbound] = contextId
+    ? await db
+        .select()
+        .from(whatsappMessages)
+        .where(
+          and(
+            eq(whatsappMessages.providerId, contextId),
+            eq(whatsappMessages.assignmentId, assignmentId),
+            eq(whatsappMessages.direction, "outbound"),
+          ),
+        )
+        .limit(1)
+    : [];
+  if (!outbound)
     [outbound] = await db
       .select()
       .from(whatsappMessages)
       .where(
         and(
-          eq(whatsappMessages.providerId, contextId),
           eq(whatsappMessages.assignmentId, assignmentId),
+          eq(whatsappMessages.direction, "outbound"),
         ),
       )
+      .orderBy(desc(whatsappMessages.createdAt))
       .limit(1);
   if (!outbound) return;
   const [row] = await db
@@ -180,11 +199,15 @@ async function processReply(message: any) {
   )
     return;
   await db.transaction(async (tx) => {
-    if (action === "help")
+    if (action === "help") {
       await tx
         .insert(helpRequests)
         .values({ assignmentId, message: "Requested through WhatsApp" });
-    else if (action !== "not_yet") {
+      await tx
+        .update(assignments)
+        .set({ status: "declined", updatedAt: new Date() })
+        .where(eq(assignments.id, assignmentId));
+    } else if (action !== "not_yet") {
       const next =
         action === "accept"
           ? "accepted"

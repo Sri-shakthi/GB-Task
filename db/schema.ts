@@ -215,6 +215,7 @@ export const assignments = pgTable(
     title: varchar("title", { length: 240 }),
     instructions: text("instructions"),
     recordingId: uuid("recording_id").references(() => mediaAssets.id),
+    videoPath: text("video_path"),
     status: taskStatus("status").notNull().default("assigned"),
     priority: varchar("priority", { length: 20 }).notNull().default("normal"),
     dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
@@ -230,7 +231,7 @@ export const assignmentEvents = pgTable("assignment_events", {
   id: uuid("id").primaryKey().defaultRandom(),
   assignmentId: uuid("assignment_id")
     .notNull()
-    .references(() => assignments.id),
+    .references(() => assignments.id, { onDelete: "cascade" }),
   // `owner:` / `staff:` plus a 36-character UUID needs 42 characters.
   actor: varchar("actor", { length: 64 }).notNull(),
   type: varchar("type", { length: 80 }).notNull(),
@@ -243,7 +244,7 @@ export const helpRequests = pgTable("help_requests", {
   id: uuid("id").primaryKey().defaultRandom(),
   assignmentId: uuid("assignment_id")
     .notNull()
-    .references(() => assignments.id),
+    .references(() => assignments.id, { onDelete: "cascade" }),
   message: text("message"),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   ...audit,
@@ -252,7 +253,9 @@ export const whatsappMessages = pgTable(
   "whatsapp_messages",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    assignmentId: uuid("assignment_id").references(() => assignments.id),
+    assignmentId: uuid("assignment_id").references(() => assignments.id, {
+      onDelete: "cascade",
+    }),
     providerId: text("provider_id"),
     direction: varchar("direction", { length: 10 }).notNull(),
     status: varchar("status", { length: 40 }).notNull(),
@@ -283,7 +286,9 @@ export const jobs = pgTable(
     restaurantId: uuid("restaurant_id")
       .notNull()
       .references(() => restaurants.id),
-    assignmentId: uuid("assignment_id").references(() => assignments.id),
+    assignmentId: uuid("assignment_id").references(() => assignments.id, {
+      onDelete: "cascade",
+    }),
     type: varchar("type", { length: 50 }).notNull(),
     payload: jsonb("payload").notNull().default({}),
     status: jobStatus("status").notNull().default("pending"),
@@ -303,7 +308,7 @@ export const staffTaskLinks = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     assignmentId: uuid("assignment_id")
       .notNull()
-      .references(() => assignments.id),
+      .references(() => assignments.id, { onDelete: "cascade" }),
     tokenHash: varchar("token_hash", { length: 64 }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),

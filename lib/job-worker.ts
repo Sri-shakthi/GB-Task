@@ -1,4 +1,5 @@
 import "server-only";
+import { del, put } from "@vercel/blob";
 import { and, eq, lt, lte, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
@@ -6,6 +7,7 @@ import {
   jobs,
   mediaAssets,
   staff,
+  webhookEvents,
   whatsappMessages,
 } from "@/db/schema";
 import { prepareTaskVideo } from "./media";
@@ -73,8 +75,7 @@ export async function processDueJobs(limit = 5) {
             payload,
           );
         else await send(leased.id, leased.assignmentId!, payload);
-      }
-      else throw new Error(`Unknown job type: ${leased.type}`);
+      } else throw new Error(`Unknown job type: ${leased.type}`);
       result.completed++;
     } catch (error) {
       const uncertain =
@@ -110,15 +111,15 @@ async function prepareVideo(
   if (!payload.recordingPath)
     throw new Error("Video preparation job has no recording");
 
-  const recordingId =
-    payload.recordingId ||
-    (
-      await db
-        .select({ recordingId: assignments.recordingId })
-        .from(assignments)
-        .where(eq(assignments.id, assignmentId))
-        .limit(1)
-    )[0]?.recordingId;
+  const [assignment] = await db
+    .select({
+      recordingId: assignments.recordingId,
+      videoPath: assignments.videoPath,
+    })
+    .from(assignments)
+    .where(eq(assignments.id, assignmentId))
+    .limit(1);
+  const recordingId = payload.recordingId || assignment?.recordingId;
   if (!recordingId) throw new Error("Video preparation job has no recording");
 
   // A Meta media ID is reusable. Reusing this recording skips both FFmpeg and
@@ -141,18 +142,46 @@ async function prepareVideo(
   const freshEnough =
     recording?.updatedAt &&
     recording.updatedAt.getTime() > Date.now() - 25 * 24 * 60 * 60 * 1000;
-  let mediaId = freshEnough ? recording?.providerMediaId || undefined : undefined;
+  let mediaId = freshEnough
+    ? recording?.providerMediaId || undefined
+    : undefined;
+  let video: ArrayBuffer | undefined;
+  // Saving a dashboard copy is independent from Meta's reusable media ID.
+  // Otherwise a reused Meta upload leaves this assignment without a preview.
+  if (!assignment?.videoPath)
+    video = await prepareTaskVideo({
+      recordingPath: payload.recordingPath,
+      assignmentId,
+      title: payload.title || "Today's tasks",
+    });
   if (!mediaId) {
-    const video = await prepareTaskVideo({
+    video ??= await prepareTaskVideo({
       recordingPath: payload.recordingPath,
       assignmentId,
       title: payload.title || "Today's tasks",
     });
     mediaId = (await uploadVideoToMeta(video)).id;
+  }
+  if (video) {
+    const storedVideo = await put(
+      `restaurants/${restaurantId}/task-videos/${assignmentId}.mp4`,
+      video,
+      {
+        access: "private",
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: "video/mp4",
+      },
+    );
+    await db
+      .update(assignments)
+      .set({ videoPath: storedVideo.pathname, updatedAt: new Date() })
+      .where(eq(assignments.id, assignmentId));
     await db
       .update(mediaAssets)
-      .set({ providerMediaId: mediaId, updatedAt: new Date() })
+      .set({ providerMediaId: mediaId, blobUrl: null, updatedAt: new Date() })
       .where(eq(mediaAssets.id, recordingId));
+    await del(payload.recordingPath);
   }
   await db
     .update(jobs)
@@ -165,6 +194,35 @@ async function prepareVideo(
       updatedAt: new Date(),
     })
     .where(eq(jobs.id, jobId));
+}
+
+export async function purgeExpiredTaskHistory(retentionDays = 8) {
+  const db = getDb(),
+    cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000),
+    expired = await db
+      .select({ id: assignments.id, videoPath: assignments.videoPath })
+      .from(assignments)
+      .where(lt(assignments.createdAt, cutoff));
+  const videoPaths = expired.flatMap((row) =>
+    row.videoPath ? [row.videoPath] : [],
+  );
+  if (videoPaths.length) await del(videoPaths);
+  const removed = await db
+    .delete(assignments)
+    .where(lt(assignments.createdAt, cutoff))
+    .returning({ recordingId: assignments.recordingId });
+  for (const row of removed) {
+    if (!row.recordingId) continue;
+    const [asset] = await db
+      .select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl })
+      .from(mediaAssets)
+      .where(eq(mediaAssets.id, row.recordingId))
+      .limit(1);
+    if (asset?.blobUrl) await del(asset.blobUrl);
+    if (asset) await db.delete(mediaAssets).where(eq(mediaAssets.id, asset.id));
+  }
+  await db.delete(webhookEvents).where(lt(webhookEvents.createdAt, cutoff));
+  return { deleted: expired.length };
 }
 async function send(jobId: string, assignmentId: string, payload: Payload) {
   const db = getDb(),
@@ -191,21 +249,19 @@ async function send(jobId: string, assignmentId: string, payload: Payload) {
     body: row.assignment.instructions || undefined,
   });
   await db.transaction(async (tx) => {
-    await tx
-      .insert(whatsappMessages)
-      .values({
-        assignmentId,
-        direction: "outbound",
-        providerId: response.id,
-        status: response.status,
-        templateName: payload.mediaId
-          ? row.person.language === "ta"
-            ? process.env.WHATSAPP_VIDEO_TEMPLATE_TA
-            : process.env.WHATSAPP_VIDEO_TEMPLATE_EN
-          : row.person.language === "ta"
-            ? process.env.WHATSAPP_TEXT_TEMPLATE_TA
-            : process.env.WHATSAPP_TEXT_TEMPLATE_EN,
-      });
+    await tx.insert(whatsappMessages).values({
+      assignmentId,
+      direction: "outbound",
+      providerId: response.id,
+      status: response.status,
+      templateName: payload.mediaId
+        ? row.person.language === "ta"
+          ? process.env.WHATSAPP_VIDEO_TEMPLATE_TA
+          : process.env.WHATSAPP_VIDEO_TEMPLATE_EN
+        : row.person.language === "ta"
+          ? process.env.WHATSAPP_TEXT_TEMPLATE_TA
+          : process.env.WHATSAPP_TEXT_TEMPLATE_EN,
+    });
     await tx
       .update(jobs)
       .set({

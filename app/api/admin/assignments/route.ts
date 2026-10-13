@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { after } from "next/server";
 import { z } from "zod";
 import { getOwnerSession } from "@/lib/auth";
@@ -28,8 +28,16 @@ export async function GET() {
     .from(assignments)
     .innerJoin(staff, eq(assignments.assigneeId, staff.id))
     .leftJoin(departments, eq(assignments.departmentId, departments.id))
-    .where(eq(assignments.restaurantId, session.restaurantId))
-    .orderBy(desc(assignments.dueAt))
+    .where(
+      and(
+        eq(assignments.restaurantId, session.restaurantId),
+        gte(
+          assignments.createdAt,
+          new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+        ),
+      ),
+    )
+    .orderBy(desc(assignments.createdAt))
     .limit(200);
   const ids = rows.map((row) => row.assignment.id);
   const messages = ids.length
@@ -70,9 +78,11 @@ export async function GET() {
       title: assignment.title || "Voice instructions",
       department: department || "Other",
       dueAt: assignment.dueAt.toISOString(),
+      assignedAt: assignment.createdAt.toISOString(),
       status: assignment.status,
       instructions: assignment.instructions,
       hasRecording: Boolean(assignment.recordingId),
+      hasVideo: Boolean(assignment.videoPath),
       deliveryStatus: latestMessage.get(assignment.id)?.status || "queued",
       deliveryUpdatedAt:
         latestMessage.get(assignment.id)?.updatedAt.toISOString() || null,
@@ -154,24 +164,24 @@ export async function POST(request: Request) {
         dueAt: parsed.data.dueAt,
       })
       .returning();
-    await tx
-      .insert(assignmentEvents)
-      .values({
-        assignmentId: assignment.id,
-        actor: `owner:${session.ownerId}`,
-        type: "assigned",
-      });
-    await tx
-      .insert(jobs)
-      .values({
-        restaurantId: session.restaurantId,
-        assignmentId: assignment.id,
-        // The worker converts each recording to a template-compatible MP4,
-        // uploads it to Meta once, then sends the resulting media ID.
-        type: recordingPath ? "prepare_video" : "send_whatsapp",
-        payload: { recordingPath, recordingId: parsed.data.recordingId, title: assignment.title },
-        status: "pending",
-      });
+    await tx.insert(assignmentEvents).values({
+      assignmentId: assignment.id,
+      actor: `owner:${session.ownerId}`,
+      type: "assigned",
+    });
+    await tx.insert(jobs).values({
+      restaurantId: session.restaurantId,
+      assignmentId: assignment.id,
+      // The worker converts each recording to a template-compatible MP4,
+      // uploads it to Meta once, then sends the resulting media ID.
+      type: recordingPath ? "prepare_video" : "send_whatsapp",
+      payload: {
+        recordingPath,
+        recordingId: parsed.data.recordingId,
+        title: assignment.title,
+      },
+      status: "pending",
+    });
     return assignment;
   });
   // Start delivery as soon as the assignment response has been returned. The
