@@ -123,8 +123,8 @@ export async function POST(request: Request) {
       { error: "Invalid assignment", details: parsed.error.flatten() },
       { status: 400 },
     );
-  const db = getDb(),
-    [person] = await db
+  const db = getDb();
+  const personPromise = db
       .select()
       .from(staff)
       .where(
@@ -134,29 +134,29 @@ export async function POST(request: Request) {
           eq(staff.active, true),
         ),
       )
-      .limit(1);
+      .limit(1),
+    mediaPromise = parsed.data.recordingId
+      ? db
+          .select()
+          .from(mediaAssets)
+          .where(
+            and(
+              eq(mediaAssets.id, parsed.data.recordingId),
+              eq(mediaAssets.restaurantId, session.restaurantId),
+              eq(mediaAssets.kind, "voice_recording"),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([]);
+  const [[person], [media]] = await Promise.all([personPromise, mediaPromise]);
   if (!person)
     return Response.json(
       { error: "Active staff member not found" },
       { status: 404 },
     );
-  let recordingPath: string | undefined;
-  if (parsed.data.recordingId) {
-    const [media] = await db
-      .select()
-      .from(mediaAssets)
-      .where(
-        and(
-          eq(mediaAssets.id, parsed.data.recordingId),
-          eq(mediaAssets.restaurantId, session.restaurantId),
-          eq(mediaAssets.kind, "voice_recording"),
-        ),
-      )
-      .limit(1);
-    if (!media?.blobUrl)
-      return Response.json({ error: "Recording not found" }, { status: 404 });
-    recordingPath = media.blobUrl;
-  }
+  if (parsed.data.recordingId && !media?.blobUrl)
+    return Response.json({ error: "Recording not found" }, { status: 404 });
+  const recordingPath = media?.blobUrl || undefined;
   const created = await db.transaction(async (tx) => {
     const [assignment] = await tx
       .insert(assignments)

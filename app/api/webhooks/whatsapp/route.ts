@@ -110,7 +110,8 @@ async function processReply(message: any) {
       )
         .trim()
         .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "_")
+        .normalize("NFKC")
+        .replace(/[^\p{L}\p{N}]+/gu, "_")
         .replace(/^_+|_+$/g, "")
         // WhatsApp Flows may prefix option values with their list position,
         // for example `1_No` or `2_Need help`.
@@ -122,6 +123,9 @@ async function processReply(message: any) {
         "done",
         "i_m_done",
         "im_done",
+        "முடிந்தது",
+        "முடித்துவிட்டேன்",
+        "வேலை_முடிந்தது",
       ].includes(answer)
         ? "complete"
         : [
@@ -131,6 +135,9 @@ async function processReply(message: any) {
               "i_m_doing_it",
               "im_doing_it",
               "started",
+              "செய்து_கொண்டிருக்கிறேன்",
+              "செய்துகொண்டிருக்கிறேன்",
+              "வேலை_செய்து_கொண்டிருக்கிறேன்",
             ].includes(answer)
           ? "start"
           : [
@@ -140,11 +147,18 @@ async function processReply(message: any) {
                 "not_yet",
                 "not_started",
                 "not_started_yet",
+                "இன்னும்_தொடங்கவில்லை",
+                "தொடங்கவில்லை",
               ].includes(answer)
             ? "not_yet"
-            : ["need_help", "help", "needs_help", "help_needed"].includes(
-                  answer,
-                )
+            : [
+                  "need_help",
+                  "help",
+                  "needs_help",
+                  "help_needed",
+                  "உதவி_தேவை",
+                  "உதவி_வேண்டும்",
+                ].includes(answer)
               ? "help"
               : ["accept", "accepted"].includes(answer)
                 ? "accept"

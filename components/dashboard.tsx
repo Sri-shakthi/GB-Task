@@ -1,4 +1,5 @@
 "use client";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -19,7 +20,9 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import ChromaGrid from "@/components/chroma-grid";
+const ChromaGrid = dynamic(() => import("@/components/chroma-grid"), {
+  loading: () => <div className="card empty">Loading team…</div>,
+});
 type View = "today" | "staff" | "history" | "settings";
 type Status =
   "Pending" | "In progress" | "Completed" | "Not completed" | "Needs attention";
@@ -1208,6 +1211,7 @@ function AssignSheet({
     [audio, setAudio] = useState<string | null>(null),
     [audioBlob, setAudioBlob] = useState<Blob | null>(null),
     [busy, setBusy] = useState(false),
+    [busyLabel, setBusyLabel] = useState(""),
     [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null),
     recorder = useRef<MediaRecorder | null>(null),
@@ -1274,11 +1278,13 @@ function AssignSheet({
       setError("Add a task title or record voice instructions.");
       return;
     }
+    let createdId: string | number = Date.now();
     if (typeof person.id === "string") {
       try {
         setBusy(true);
         let recordingId: string | undefined;
         if (audioBlob) {
+          setBusyLabel("Uploading recording…");
           const media = new FormData();
           media.set(
             "file",
@@ -1296,6 +1302,7 @@ function AssignSheet({
         }
         const date = String(d.get("date")),
           time = String(d.get("time"));
+        setBusyLabel("Saving assignment…");
         const response = await fetch("/api/admin/assignments", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -1309,16 +1316,18 @@ function AssignSheet({
         });
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || "Task creation failed");
+        createdId = body.assignment.id;
       } catch (cause) {
         setError(
           cause instanceof Error ? cause.message : "Could not assign this task",
         );
         setBusy(false);
+        setBusyLabel("");
         return;
       }
     }
     onSubmit({
-      id: Date.now(),
+      id: createdId,
       name: person?.name || "Staff",
       initials: person?.initials || "GB",
       title: title || "Voice instructions",
@@ -1462,7 +1471,7 @@ function AssignSheet({
           className="btn btn-primary submit"
           disabled={busy || !filteredStaff.length}
         >
-          {busy ? "Uploading & assigning…" : "Assign & send"}{" "}
+          {busy ? busyLabel || "Assigning…" : "Assign & send"}{" "}
           <ChevronRight size={18} />
         </button>
       </form>
