@@ -39,6 +39,7 @@ type Task = {
   instructions: string | null;
   hasRecording: boolean;
   hasVideo: boolean;
+  hasCompletionPhoto: boolean;
 };
 type Staff = {
   id: number | string;
@@ -80,6 +81,7 @@ function taskFromApi(task: {
   instructions: string | null;
   hasRecording: boolean;
   hasVideo: boolean;
+  hasCompletionPhoto: boolean;
   deliveryStatus: string;
   deliveryUpdatedAt: string | null;
   staffResponse: string | null;
@@ -117,6 +119,7 @@ function taskFromApi(task: {
     instructions: task.instructions,
     hasRecording: task.hasRecording,
     hasVideo: task.hasVideo,
+    hasCompletionPhoto: task.hasCompletionPhoto,
   };
 }
 export default function Dashboard({
@@ -1052,6 +1055,16 @@ function TaskDetailsSheet({
           <p className="meta">Voice instructions are attached to this task.</p>
         )}
         {(task.hasRecording || task.hasVideo) && <TaskVideo taskId={task.id} />}
+        {task.hasCompletionPhoto && (
+          <div className="field">
+            <label>Completed work</label>
+            <img
+              className="completion-photo"
+              src={`/api/admin/assignments/${task.id}/photo`}
+              alt={`Completed work submitted by ${task.name}`}
+            />
+          </div>
+        )}
       </div>
     </Sheet>
   );
@@ -1334,6 +1347,7 @@ function AssignSheet({
         instructions: null,
         hasRecording: Boolean(audioBlob),
         hasVideo: false,
+        hasCompletionPhoto: false,
       };
     // Give immediate feedback. The Blob and all form values remain captured by
     // this async function after the sheet unmounts.

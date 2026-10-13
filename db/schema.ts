@@ -216,6 +216,7 @@ export const assignments = pgTable(
     instructions: text("instructions"),
     recordingId: uuid("recording_id").references(() => mediaAssets.id),
     videoPath: text("video_path"),
+    completionPhotoPath: text("completion_photo_path"),
     status: taskStatus("status").notNull().default("assigned"),
     priority: varchar("priority", { length: 20 }).notNull().default("normal"),
     dueAt: timestamp("due_at", { withTimezone: true }).notNull(),

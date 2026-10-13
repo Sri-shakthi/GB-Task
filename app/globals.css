@@ -246,6 +246,15 @@ button {
   border-radius: 12px;
   background: #101512;
 }
+.completion-photo {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f4f0e8;
+}
 .task-head {
   display: flex;
   justify-content: space-between;

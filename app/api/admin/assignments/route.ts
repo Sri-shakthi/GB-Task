@@ -40,28 +40,28 @@ export async function GET() {
     .orderBy(desc(assignments.createdAt))
     .limit(200);
   const ids = rows.map((row) => row.assignment.id);
-  const messages = ids.length
-    ? await db
-        .select({
-          assignmentId: whatsappMessages.assignmentId,
-          status: whatsappMessages.status,
-          updatedAt: whatsappMessages.updatedAt,
-        })
-        .from(whatsappMessages)
-        .where(inArray(whatsappMessages.assignmentId, ids))
-        .orderBy(desc(whatsappMessages.updatedAt))
-    : [];
-  const events = ids.length
-    ? await db
-        .select({
-          assignmentId: assignmentEvents.assignmentId,
-          type: assignmentEvents.type,
-          createdAt: assignmentEvents.createdAt,
-        })
-        .from(assignmentEvents)
-        .where(inArray(assignmentEvents.assignmentId, ids))
-        .orderBy(desc(assignmentEvents.createdAt))
-    : [];
+  const [messages, events] = ids.length
+    ? await Promise.all([
+        db
+          .select({
+            assignmentId: whatsappMessages.assignmentId,
+            status: whatsappMessages.status,
+            updatedAt: whatsappMessages.updatedAt,
+          })
+          .from(whatsappMessages)
+          .where(inArray(whatsappMessages.assignmentId, ids))
+          .orderBy(desc(whatsappMessages.updatedAt)),
+        db
+          .select({
+            assignmentId: assignmentEvents.assignmentId,
+            type: assignmentEvents.type,
+            createdAt: assignmentEvents.createdAt,
+          })
+          .from(assignmentEvents)
+          .where(inArray(assignmentEvents.assignmentId, ids))
+          .orderBy(desc(assignmentEvents.createdAt)),
+      ])
+    : [[], []];
   const latestMessage = new Map<string, (typeof messages)[number]>();
   for (const message of messages)
     if (message.assignmentId && !latestMessage.has(message.assignmentId))
@@ -91,6 +91,7 @@ export async function GET() {
       instructions: assignment.instructions,
       hasRecording: Boolean(assignment.recordingId),
       hasVideo: Boolean(assignment.videoPath),
+      hasCompletionPhoto: Boolean(assignment.completionPhotoPath),
       deliveryStatus: latestMessage.get(assignment.id)?.status || "queued",
       deliveryUpdatedAt:
         latestMessage.get(assignment.id)?.updatedAt.toISOString() || null,
@@ -125,21 +126,8 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   const db = getDb();
-  if (parsed.data.clientRequestId) {
-    const [existing] = await db
-      .select()
-      .from(assignments)
-      .where(
-        and(
-          eq(assignments.id, parsed.data.clientRequestId),
-          eq(assignments.restaurantId, session.restaurantId),
-        ),
-      )
-      .limit(1);
-    if (existing) return Response.json({ assignment: existing });
-  }
   const personPromise = db
-      .select()
+      .select({ id: staff.id })
       .from(staff)
       .where(
         and(
@@ -151,7 +139,7 @@ export async function POST(request: Request) {
       .limit(1),
     mediaPromise = parsed.data.recordingId
       ? db
-          .select()
+          .select({ blobUrl: mediaAssets.blobUrl })
           .from(mediaAssets)
           .where(
             and(
@@ -171,42 +159,68 @@ export async function POST(request: Request) {
   if (parsed.data.recordingId && !media?.blobUrl)
     return Response.json({ error: "Recording not found" }, { status: 404 });
   const recordingPath = media?.blobUrl || undefined;
-  const created = await db.transaction(async (tx) => {
-    const [assignment] = await tx
-      .insert(assignments)
-      .values({
-        id: parsed.data.clientRequestId,
+  let created: typeof assignments.$inferSelect;
+  try {
+    created = await db.transaction(async (tx) => {
+      const [assignment] = await tx
+        .insert(assignments)
+        .values({
+          id: parsed.data.clientRequestId,
+          restaurantId: session.restaurantId,
+          assigneeId: person.id,
+          departmentId: parsed.data.departmentId,
+          title: parsed.data.title,
+          instructions: parsed.data.instructions,
+          recordingId: parsed.data.recordingId,
+          status: "assigned",
+          priority: parsed.data.priority,
+          dueAt: parsed.data.dueAt,
+        })
+        .returning();
+      await tx.insert(assignmentEvents).values({
+        assignmentId: assignment.id,
+        actor: `owner:${session.ownerId}`,
+        type: "assigned",
+      });
+      await tx.insert(jobs).values({
         restaurantId: session.restaurantId,
-        assigneeId: person.id,
-        departmentId: parsed.data.departmentId,
-        title: parsed.data.title,
-        instructions: parsed.data.instructions,
-        recordingId: parsed.data.recordingId,
-        status: "assigned",
-        priority: parsed.data.priority,
-        dueAt: parsed.data.dueAt,
-      })
-      .returning();
-    await tx.insert(assignmentEvents).values({
-      assignmentId: assignment.id,
-      actor: `owner:${session.ownerId}`,
-      type: "assigned",
+        assignmentId: assignment.id,
+        // The worker converts each recording to a template-compatible MP4,
+        // uploads it to Meta once, then sends the resulting media ID.
+        type: recordingPath ? "prepare_video" : "send_whatsapp",
+        payload: {
+          recordingPath,
+          recordingId: parsed.data.recordingId,
+          title: assignment.title,
+        },
+        status: "pending",
+      });
+      return assignment;
     });
-    await tx.insert(jobs).values({
-      restaurantId: session.restaurantId,
-      assignmentId: assignment.id,
-      // The worker converts each recording to a template-compatible MP4,
-      // uploads it to Meta once, then sends the resulting media ID.
-      type: recordingPath ? "prepare_video" : "send_whatsapp",
-      payload: {
-        recordingPath,
-        recordingId: parsed.data.recordingId,
-        title: assignment.title,
-      },
-      status: "pending",
-    });
-    return assignment;
-  });
+  } catch (error) {
+    // Normal requests no longer pay for an idempotency lookup. Only a rare
+    // client retry does the extra read after its UUID already exists.
+    if (
+      parsed.data.clientRequestId &&
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "23505"
+    ) {
+      const [existing] = await db
+        .select()
+        .from(assignments)
+        .where(
+          and(
+            eq(assignments.id, parsed.data.clientRequestId),
+            eq(assignments.restaurantId, session.restaurantId),
+          ),
+        )
+        .limit(1);
+      if (existing) return Response.json({ assignment: existing });
+    }
+    throw error;
+  }
   // Start delivery as soon as the assignment response has been returned. The
   // scheduled worker remains the durable retry path if this background run is
   // interrupted by a serverless instance shutdown.

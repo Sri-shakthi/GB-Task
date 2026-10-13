@@ -12,11 +12,13 @@ import {
 } from "@/db/schema";
 import { prepareTaskVideo } from "./media";
 import { sendTask, uploadVideoToMeta } from "./whatsapp";
+import { storeFlowPhoto, type FlowPhoto } from "./whatsapp-flow-media";
 type Payload = {
   recordingPath?: string;
   recordingId?: string;
   title?: string;
   mediaId?: string;
+  completionPhoto?: FlowPhoto;
 };
 export async function processDueJobs(limit = 5) {
   const db = getDb(),
@@ -75,6 +77,32 @@ export async function processDueJobs(limit = 5) {
             payload,
           );
         else await send(leased.id, leased.assignmentId!, payload);
+      } else if (leased.type === "store_completion_photo") {
+        const payload = leased.payload as Payload;
+        if (!payload.completionPhoto || !leased.assignmentId)
+          throw new Error("Completion photo job has no photo");
+        const path = await storeFlowPhoto(
+          payload.completionPhoto,
+          leased.restaurantId,
+          leased.assignmentId,
+        );
+        await db.transaction(async (tx) => {
+          await tx
+            .update(assignments)
+            .set({ completionPhotoPath: path, updatedAt: new Date() })
+            .where(eq(assignments.id, leased.assignmentId!));
+          await tx
+            .update(jobs)
+            // Scrub the temporary CDN URL and encryption keys after storage.
+            .set({
+              status: "completed",
+              payload: {},
+              leaseUntil: null,
+              lastError: null,
+              updatedAt: new Date(),
+            })
+            .where(eq(jobs.id, leased.id));
+        });
       } else throw new Error(`Unknown job type: ${leased.type}`);
       result.completed++;
     } catch (error) {
@@ -200,13 +228,21 @@ export async function purgeExpiredTaskHistory(retentionDays = 8) {
   const db = getDb(),
     cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000),
     expired = await db
-      .select({ id: assignments.id, videoPath: assignments.videoPath })
+      .select({
+        id: assignments.id,
+        videoPath: assignments.videoPath,
+        completionPhotoPath: assignments.completionPhotoPath,
+      })
       .from(assignments)
       .where(lt(assignments.createdAt, cutoff));
   const videoPaths = expired.flatMap((row) =>
-    row.videoPath ? [row.videoPath] : [],
-  );
-  if (videoPaths.length) await del(videoPaths);
+      row.videoPath ? [row.videoPath] : [],
+    ),
+    completionPhotoPaths = expired.flatMap((row) =>
+      row.completionPhotoPath ? [row.completionPhotoPath] : [],
+    ),
+    taskMediaPaths = [...videoPaths, ...completionPhotoPaths];
+  if (taskMediaPaths.length) await del(taskMediaPaths);
   const removed = await db
     .delete(assignments)
     .where(lt(assignments.createdAt, cutoff))

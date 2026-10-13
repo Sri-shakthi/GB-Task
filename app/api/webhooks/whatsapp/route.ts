@@ -7,8 +7,14 @@ import {
   staff,
   webhookEvents,
   whatsappMessages,
+  jobs,
 } from "@/db/schema";
 import { verifyMetaSignature } from "@/lib/security";
+import { parseFlowPhoto } from "@/lib/whatsapp-flow-media";
+import { after } from "next/server";
+import { processDueJobs } from "@/lib/job-worker";
+
+export const maxDuration = 30;
 export function GET(request: Request) {
   const u = new URL(request.url);
   if (
@@ -30,6 +36,7 @@ export async function POST(request: Request) {
     return new Response("Invalid JSON", { status: 400 });
   }
   const db = getDb();
+  let queuedPhoto = false;
   for (const entry of body.entry || [])
     for (const change of entry.changes || []) {
       const value = change.value || {};
@@ -72,13 +79,23 @@ export async function POST(request: Request) {
           .onConflictDoNothing()
           .returning({ id: webhookEvents.id });
         if (!inserted.length) continue;
-        await processReply(message);
+        if (await processReply(message)) queuedPhoto = true;
         await db
           .update(webhookEvents)
           .set({ processedAt: new Date() })
           .where(eq(webhookEvents.id, inserted[0].id));
       }
     }
+  if (queuedPhoto)
+    after(async () => {
+      try {
+        await processDueJobs(1);
+      } catch (error) {
+        console.error("Immediate completion photo processing failed", {
+          name: error instanceof Error ? error.name : "UnknownError",
+        });
+      }
+    });
   return Response.json({ received: true });
 }
 async function processReply(message: any) {
@@ -88,13 +105,15 @@ async function processReply(message: any) {
       message.interactive?.button_reply?.id || "",
     );
   let assignmentId = quickReply?.[1],
-    action = quickReply?.[2];
+    action = quickReply?.[2],
+    completionPhoto = null;
   if (message.interactive?.type === "nfm_reply") {
     try {
       const response = JSON.parse(
         message.interactive.nfm_reply.response_json || "{}",
       );
       const token = String(response.flow_token || response.assignment_id || "");
+      completionPhoto = parseFlowPhoto(response.completion_photo);
       assignmentId = token.startsWith("task:") ? token.slice(5) : token;
       const rawAnswer = String(
         response.answer ||
@@ -178,10 +197,11 @@ async function processReply(message: any) {
                         ? "help"
                         : undefined;
     } catch {
-      return;
+      return false;
     }
   }
-  if (!assignmentId || !action || !/^[0-9a-f-]{36}$/.test(assignmentId)) return;
+  if (!assignmentId || !action || !/^[0-9a-f-]{36}$/.test(assignmentId))
+    return false;
   // A Flow reply is authenticated by Meta's webhook signature and carries the
   // assignment in its flow_token. Some Flow replies omit context.id or return
   // a context that differs from the original template message, so fall back to
@@ -213,7 +233,7 @@ async function processReply(message: any) {
       )
       .orderBy(desc(whatsappMessages.createdAt))
       .limit(1);
-  if (!outbound) return;
+  if (!outbound) return false;
   const [row] = await db
     .select({ assignment: assignments, person: staff })
     .from(assignments)
@@ -225,7 +245,7 @@ async function processReply(message: any) {
     digits(row.person.phone) !== digits(message.from) ||
     row.assignment.cancelledAt
   )
-    return;
+    return false;
   await db.transaction(async (tx) => {
     if (action === "help") {
       await tx
@@ -255,7 +275,16 @@ async function processReply(message: any) {
       type: `whatsapp_${action}`,
       metadata: { providerMessageId: message.id, response: action },
     });
+    if (action === "complete" && completionPhoto)
+      await tx.insert(jobs).values({
+        restaurantId: row.assignment.restaurantId,
+        assignmentId,
+        type: "store_completion_photo",
+        payload: { completionPhoto },
+        status: "pending",
+      });
   });
+  return Boolean(action === "complete" && completionPhoto);
 }
 const digits = (value: string) => String(value || "").replace(/\D/g, "");
 function shouldAdvance(current: string, next: string) {
