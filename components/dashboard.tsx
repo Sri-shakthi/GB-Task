@@ -241,7 +241,27 @@ export default function Dashboard({
   function addTask(task: Task) {
     setTasks((v) => [task, ...v]);
     setAssignOpen(false);
-    setToast("Task assigned — preparing WhatsApp message");
+    setToast("Task added — sending in the background");
+  }
+  function resolveTask(tempId: Task["id"], assignmentId: string) {
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === tempId
+          ? { ...task, id: assignmentId, delivery: "Queued" }
+          : task,
+      ),
+    );
+    setToast("Task saved — WhatsApp delivery is processing");
+  }
+  function failTask(tempId: Task["id"], message: string) {
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === tempId
+          ? { ...task, status: "Needs attention", delivery: "Send failed" }
+          : task,
+      ),
+    );
+    setToast(message);
   }
   function addStaff(member: Staff) {
     setStaff((v) => [member, ...v]);
@@ -365,6 +385,8 @@ export default function Dashboard({
           departments={departments.slice(1)}
           onClose={() => setAssignOpen(false)}
           onSubmit={addTask}
+          onResolved={resolveTask}
+          onFailed={failTask}
         />
       )}{" "}
       {staffOpen && (
@@ -1172,11 +1194,15 @@ function AssignSheet({
   departments,
   onClose,
   onSubmit,
+  onResolved,
+  onFailed,
 }: {
   staff: Staff[];
   departments: string[];
   onClose: () => void;
   onSubmit: (t: Task) => void;
+  onResolved: (tempId: Task["id"], assignmentId: string) => void;
+  onFailed: (tempId: Task["id"], message: string) => void;
 }) {
   const assignableDepartments = useMemo(
       () => departments.filter((department) => department !== "All"),
@@ -1218,8 +1244,6 @@ function AssignSheet({
     [seconds, setSeconds] = useState(0),
     [audio, setAudio] = useState<string | null>(null),
     [audioBlob, setAudioBlob] = useState<Blob | null>(null),
-    [busy, setBusy] = useState(false),
-    [busyLabel, setBusyLabel] = useState(""),
     [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null),
     recorder = useRef<MediaRecorder | null>(null),
@@ -1286,71 +1310,82 @@ function AssignSheet({
       setError("Add a task title or record voice instructions.");
       return;
     }
-    let createdId: string | number = Date.now();
+    const date = String(d.get("date")),
+      time = String(d.get("time")),
+      requestId = crypto.randomUUID(),
+      tempId = `pending:${requestId}`,
+      optimisticTask: Task = {
+        id: tempId,
+        name: person.name,
+        initials: person.initials,
+        title: title || "Voice instructions",
+        department: String(d.get("department")),
+        due: new Date(`2000-01-01T${time}`).toLocaleTimeString("en-IN", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
+        assignedAt: new Date().toISOString(),
+        status: "Pending",
+        delivery: audioBlob ? "Uploading voice note" : "Saving task",
+        instructions: null,
+        hasRecording: Boolean(audioBlob),
+        hasVideo: false,
+      };
+    // Give immediate feedback. The Blob and all form values remain captured by
+    // this async function after the sheet unmounts.
+    onSubmit(optimisticTask);
     if (typeof person.id === "string") {
-      try {
-        setBusy(true);
-        let recordingId: string | undefined;
-        if (audioBlob) {
-          setBusyLabel("Uploading recording…");
-          const media = new FormData();
-          media.set(
-            "file",
-            audioBlob,
-            `instructions.${recordingExtension(audioBlob.type.split(";", 1)[0])}`,
-          );
-          const uploaded = await fetch("/api/admin/media", {
+      let recordingId: string | undefined,
+        lastError = "Could not assign this task";
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          if (audioBlob && !recordingId) {
+            const media = new FormData();
+            media.set(
+              "file",
+              audioBlob,
+              `instructions.${recordingExtension(audioBlob.type.split(";", 1)[0])}`,
+            );
+            const uploaded = await fetch("/api/admin/media", {
+              method: "POST",
+              body: media,
+            });
+            const uploadBody = await uploaded.json().catch(() => ({}));
+            if (!uploaded.ok)
+              throw new Error(uploadBody.error || "Recording upload failed");
+            recordingId = uploadBody.id;
+          }
+          const response = await fetch("/api/admin/assignments", {
             method: "POST",
-            body: media,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              staffId: person.id,
+              departmentId: person.departmentId,
+              dueAt: `${date}T${time}:00+05:30`,
+              title: title || undefined,
+              recordingId,
+              clientRequestId: requestId,
+            }),
           });
-          const uploadBody = await uploaded.json();
-          if (!uploaded.ok)
-            throw new Error(uploadBody.error || "Recording upload failed");
-          recordingId = uploadBody.id;
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok)
+            throw new Error(body.error || "Task creation failed");
+          onResolved(tempId, body.assignment.id);
+          return;
+        } catch (cause) {
+          lastError =
+            cause instanceof Error
+              ? cause.message
+              : "Could not assign this task";
+          if (attempt < 2)
+            await new Promise((resolve) =>
+              setTimeout(resolve, (attempt + 1) * 1500),
+            );
         }
-        const date = String(d.get("date")),
-          time = String(d.get("time"));
-        setBusyLabel("Saving assignment…");
-        const response = await fetch("/api/admin/assignments", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            staffId: person.id,
-            departmentId: person.departmentId,
-            dueAt: `${date}T${time}:00+05:30`,
-            title: title || undefined,
-            recordingId,
-          }),
-        });
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.error || "Task creation failed");
-        createdId = body.assignment.id;
-      } catch (cause) {
-        setError(
-          cause instanceof Error ? cause.message : "Could not assign this task",
-        );
-        setBusy(false);
-        setBusyLabel("");
-        return;
       }
+      onFailed(tempId, `${lastError}. Please try again.`);
+      return;
     }
-    onSubmit({
-      id: createdId,
-      name: person?.name || "Staff",
-      initials: person?.initials || "GB",
-      title: title || "Voice instructions",
-      department: String(d.get("department")),
-      due: new Date(`2000-01-01T${d.get("time")}`).toLocaleTimeString("en-IN", {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
-      assignedAt: new Date().toISOString(),
-      status: "Pending",
-      delivery: audio ? "Preparing video" : "Queued",
-      instructions: null,
-      hasRecording: Boolean(audioBlob),
-      hasVideo: false,
-    });
   }
   return (
     <Sheet title="Assign a task" eyebrow="NEW ASSIGNMENT" onClose={onClose}>
@@ -1477,10 +1512,9 @@ function AssignSheet({
         </div>
         <button
           className="btn btn-primary submit"
-          disabled={busy || !filteredStaff.length}
+          disabled={!filteredStaff.length}
         >
-          {busy ? busyLabel || "Assigning…" : "Assign & send"}{" "}
-          <ChevronRight size={18} />
+          Assign &amp; send <ChevronRight size={18} />
         </button>
       </form>
     </Sheet>

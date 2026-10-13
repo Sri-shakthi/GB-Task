@@ -107,6 +107,7 @@ const input = z
     title: z.string().trim().max(240).optional(),
     instructions: z.string().trim().max(4000).optional(),
     recordingId: z.string().uuid().optional(),
+    clientRequestId: z.string().uuid().optional(),
   })
   .refine(
     (v) =>
@@ -124,6 +125,19 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   const db = getDb();
+  if (parsed.data.clientRequestId) {
+    const [existing] = await db
+      .select()
+      .from(assignments)
+      .where(
+        and(
+          eq(assignments.id, parsed.data.clientRequestId),
+          eq(assignments.restaurantId, session.restaurantId),
+        ),
+      )
+      .limit(1);
+    if (existing) return Response.json({ assignment: existing });
+  }
   const personPromise = db
       .select()
       .from(staff)
@@ -161,6 +175,7 @@ export async function POST(request: Request) {
     const [assignment] = await tx
       .insert(assignments)
       .values({
+        id: parsed.data.clientRequestId,
         restaurantId: session.restaurantId,
         assigneeId: person.id,
         departmentId: parsed.data.departmentId,
