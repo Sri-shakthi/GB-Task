@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { departments } from "@/db/schema";
+import { departments, staff } from "@/db/schema";
 import { getOwnerSession } from "@/lib/auth";
 import { departmentSchema } from "@/lib/validation";
 
@@ -12,12 +12,17 @@ export async function GET() {
   const rows = await getDb()
     .select({ id: departments.id, name: departments.name })
     .from(departments)
+    .innerJoin(
+      staff,
+      and(eq(staff.departmentId, departments.id), eq(staff.active, true)),
+    )
     .where(
       and(
         eq(departments.restaurantId, session.restaurantId),
         eq(departments.active, true),
       ),
     )
+    .groupBy(departments.id, departments.name)
     .orderBy(asc(departments.name));
   return Response.json({ departments: rows });
 }

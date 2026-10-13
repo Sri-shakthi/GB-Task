@@ -382,7 +382,6 @@ export default function Dashboard({
       {assignOpen && (
         <AssignSheet
           staff={staff.filter((s) => s.active)}
-          departments={departments.slice(1)}
           onClose={() => setAssignOpen(false)}
           onSubmit={addTask}
           onResolved={resolveTask}
@@ -1191,26 +1190,30 @@ function StaffSheet({
 }
 function AssignSheet({
   staff,
-  departments,
   onClose,
   onSubmit,
   onResolved,
   onFailed,
 }: {
   staff: Staff[];
-  departments: string[];
   onClose: () => void;
   onSubmit: (t: Task) => void;
   onResolved: (tempId: Task["id"], assignmentId: string) => void;
   onFailed: (tempId: Task["id"], message: string) => void;
 }) {
   const assignableDepartments = useMemo(
-      () => departments.filter((department) => department !== "All"),
-      [departments],
+      () =>
+        [...new Set(staff.map((person) => person.department.trim()))].sort(
+          (a, b) => a.localeCompare(b),
+        ),
+      [staff],
     ),
     defaultDepartment =
       assignableDepartments.find(
-        (department) => department.toLowerCase() === "kitchen",
+        (department) => department.trim().toLowerCase() === "kitchen",
+      ) ||
+      assignableDepartments.find(
+        (department) => department.trim().toLowerCase() === "cooking master",
       ) ||
       assignableDepartments[0] ||
       "",
@@ -1219,8 +1222,8 @@ function AssignSheet({
       () =>
         staff.filter(
           (person) =>
-            person.department.toLowerCase() ===
-            selectedDepartment.toLowerCase(),
+            person.department.trim().toLocaleLowerCase() ===
+            selectedDepartment.trim().toLocaleLowerCase(),
         ),
       [selectedDepartment, staff],
     ),
@@ -1228,7 +1231,8 @@ function AssignSheet({
       String(
         staff.find(
           (person) =>
-            person.department.toLowerCase() === defaultDepartment.toLowerCase(),
+            person.department.trim().toLocaleLowerCase() ===
+            defaultDepartment.trim().toLocaleLowerCase(),
         )?.id || "",
       ),
     ),
@@ -1404,7 +1408,9 @@ function AssignSheet({
             </select>
           </div>
           <div className="field">
-            <label>Staff member</label>
+            <label>
+              Staff member <small>({filteredStaff.length} available)</small>
+            </label>
             <select
               name="staff"
               value={selectedStaffId}

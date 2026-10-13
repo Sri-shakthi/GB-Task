@@ -94,16 +94,31 @@ export async function POST(request: Request) {
       { status: 409 },
     );
   let [department] = await db
-    .select({ id: departments.id, name: departments.name })
+    .select({
+      id: departments.id,
+      name: departments.name,
+      active: departments.active,
+    })
     .from(departments)
     .where(
       and(
         eq(departments.name, parsed.data.workCategory),
         eq(departments.restaurantId, session.restaurantId),
-        eq(departments.active, true),
       ),
     )
     .limit(1);
+  if (department && !department.active) {
+    const [restored] = await db
+      .update(departments)
+      .set({ active: true, updatedAt: new Date() })
+      .where(eq(departments.id, department.id))
+      .returning({
+        id: departments.id,
+        name: departments.name,
+        active: departments.active,
+      });
+    department = restored;
+  }
   if (!department) {
     [department] = await db
       .insert(departments)
@@ -112,10 +127,18 @@ export async function POST(request: Request) {
         name: parsed.data.workCategory,
       })
       .onConflictDoNothing()
-      .returning({ id: departments.id, name: departments.name });
+      .returning({
+        id: departments.id,
+        name: departments.name,
+        active: departments.active,
+      });
     if (!department) {
       [department] = await db
-        .select({ id: departments.id, name: departments.name })
+        .select({
+          id: departments.id,
+          name: departments.name,
+          active: departments.active,
+        })
         .from(departments)
         .where(
           and(
