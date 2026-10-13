@@ -1,5 +1,3 @@
-import { redirect } from "next/navigation";
-import { getOwnerSession } from "@/lib/auth";
 import GoogleSignIn from "@/components/google-sign-in";
 import SessionExpiredNotice from "@/components/session-expired-notice";
 export const dynamic = "force-dynamic";
@@ -8,7 +6,6 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  if (await getOwnerSession()) redirect("/");
   const query = await searchParams;
   return (
     <main className="auth-page">

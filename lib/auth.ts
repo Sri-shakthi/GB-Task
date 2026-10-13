@@ -229,7 +229,7 @@ export async function getOwnerSession() {
   } satisfies OwnerSession;
 }
 export async function clearOwnerSession(payload?: OwnerSession | null) {
-  payload ??= await getOwnerSession();
+  if (payload === undefined) payload = await getOwnerSession();
   if (payload) {
     try {
       const meta = await requestMeta(),
@@ -249,16 +249,34 @@ export async function clearOwnerSession(payload?: OwnerSession | null) {
       });
     }
   }
-  await neonAuth.signOut();
-  const cookieStore = await cookies();
-  for (const name of [
-    "__Secure-neon-auth.session_token",
-    "__Secure-neon-auth.local.session_data",
-    "__Secure-neon-auth.session_challenge",
-    "__Secure-neon-auth.session_challange",
-    SESSION_COOKIE,
-  ])
-    cookieStore.delete(name);
+  try {
+    await neonAuth.signOut();
+  } catch (error) {
+    // Local logout must still complete during an auth-provider outage.
+    console.error("Neon Auth sign out failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+    });
+  } finally {
+    const cookieStore = await cookies();
+    for (const name of [
+      "__Secure-neon-auth.session_token",
+      "__Secure-neon-auth.local.session_data",
+      "__Secure-neon-auth.session_challenge",
+      "__Secure-neon-auth.session_challange",
+      SESSION_COOKIE,
+    ]) {
+      cookieStore.set(name, "", {
+        expires: new Date(0),
+        maxAge: 0,
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+        httpOnly: true,
+        sameSite: "lax",
+      });
+      // Clear a possible host-only development cookie as well.
+      cookieStore.delete(name);
+    }
+  }
 }
 export function csrfToken(session: OwnerSession) {
   return createHmac("sha256", secret())

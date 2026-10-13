@@ -393,12 +393,11 @@ function Logout({ csrf, avatar }: { csrf: string; avatar?: boolean }) {
     if (busy) return;
     setBusy(true);
     try {
-      const body = new FormData(event.currentTarget),
-        response = await fetch("/logout", {
-          method: "POST",
-          body,
-          credentials: "same-origin",
-        });
+      const response = await fetch("/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
       if (!response.ok) throw new Error("Sign out failed");
       localStorage.removeItem("gb_authenticated");
       window.location.replace("/login");
