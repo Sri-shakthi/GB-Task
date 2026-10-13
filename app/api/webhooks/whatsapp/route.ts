@@ -96,7 +96,7 @@ async function processReply(message: any) {
       );
       const token = String(response.flow_token || response.assignment_id || "");
       assignmentId = token.startsWith("task:") ? token.slice(5) : token;
-      const answer = String(
+      const rawAnswer = String(
         response.answer ||
           response.response ||
           response.selection ||
@@ -107,15 +107,19 @@ async function processReply(message: any) {
               typeof value === "string",
           )?.[1] ||
           "",
-      )
-        .trim()
-        .toLowerCase()
-        .normalize("NFKC")
-        .replace(/[^\p{L}\p{N}]+/gu, "_")
-        .replace(/^_+|_+$/g, "")
-        // WhatsApp Flows may prefix option values with their list position,
-        // for example `1_No` or `2_Need help`.
-        .replace(/^\d+_/, "");
+      ).trim();
+      const optionIndex = /^(\d+)[_\s-]/u.exec(rawAnswer)?.[1],
+        answer = rawAnswer
+          .trim()
+          .toLowerCase()
+          .normalize("NFKC")
+          // Tamil vowels and pulli are combining marks (\p{M}); removing them
+          // changes the word and prevents the selected option from matching.
+          .replace(/[^\p{L}\p{M}\p{N}]+/gu, "_")
+          .replace(/^_+|_+$/g, "")
+          // WhatsApp Flows may prefix option values with their list position,
+          // for example `1_No` or `2_Need help`.
+          .replace(/^\d+_/, "");
       action = [
         "yes",
         "completed",
@@ -162,7 +166,17 @@ async function processReply(message: any) {
               ? "help"
               : ["accept", "accepted"].includes(answer)
                 ? "accept"
-                : undefined;
+                : // The current four-option Flow uses stable option indexes.
+                  // This also handles future label/emoji changes safely.
+                  optionIndex === "0"
+                  ? "complete"
+                  : optionIndex === "1"
+                    ? "start"
+                    : optionIndex === "2"
+                      ? "not_yet"
+                      : optionIndex === "3"
+                        ? "help"
+                        : undefined;
     } catch {
       return;
     }

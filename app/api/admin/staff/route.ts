@@ -72,6 +72,27 @@ export async function POST(request: Request) {
     );
 
   const db = getDb();
+  const [existing] = await db
+    .select({
+      id: staff.id,
+      active: staff.active,
+      photoPath: staff.photoPath,
+    })
+    .from(staff)
+    .where(
+      and(
+        eq(staff.restaurantId, session.restaurantId),
+        eq(staff.phone, parsed.data.phone),
+      ),
+    )
+    .limit(1);
+  if (existing?.active)
+    return Response.json(
+      {
+        error: "That WhatsApp number already belongs to an active staff member",
+      },
+      { status: 409 },
+    );
   let [department] = await db
     .select({ id: departments.id, name: departments.name })
     .from(departments)
@@ -136,21 +157,34 @@ export async function POST(request: Request) {
   }
 
   try {
-    const [created] = await db
-      .insert(staff)
-      .values({
-        restaurantId: session.restaurantId,
+    const values = {
         departmentId: department.id,
         name: parsed.data.name,
         phone: parsed.data.phone,
         role: parsed.data.role,
         address: parsed.data.address,
-        photoPath,
+        photoPath: photoPath || existing?.photoPath || null,
         language: parsed.data.language,
         shift: parsed.data.shift,
+        active: true,
         consentedAt: new Date(),
-      })
-      .returning();
+        updatedAt: new Date(),
+      },
+      [created] = existing
+        ? await db
+            .update(staff)
+            .set(values)
+            .where(
+              and(
+                eq(staff.id, existing.id),
+                eq(staff.restaurantId, session.restaurantId),
+              ),
+            )
+            .returning()
+        : await db
+            .insert(staff)
+            .values({ restaurantId: session.restaurantId, ...values })
+            .returning();
     return Response.json(
       {
         staff: {
@@ -174,11 +208,23 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    if (String(error).includes("staff_restaurant_phone"))
+    const databaseError = error as { code?: string; constraint?: string };
+    if (
+      databaseError.code === "23505" ||
+      databaseError.constraint === "staff_restaurant_phone" ||
+      String(error).includes("staff_restaurant_phone")
+    )
       return Response.json(
         { error: "That WhatsApp number already belongs to a staff member" },
         { status: 409 },
       );
-    throw error;
+    console.error("Staff creation failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      code: databaseError.code || null,
+    });
+    return Response.json(
+      { error: "Staff member could not be saved. Please try again." },
+      { status: 500 },
+    );
   }
 }

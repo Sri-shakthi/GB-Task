@@ -1089,8 +1089,16 @@ function StaffSheet({
         method: "POST",
         body: form,
       });
-      const body = await response.json();
+      const responseText = await response.text();
+      let body: { error?: string; staff?: Staff } = {};
+      try {
+        body = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        // Keep a useful fallback when an upstream platform returns HTML or an
+        // empty error response instead of the API's JSON body.
+      }
       if (!response.ok) throw new Error(body.error || "Could not add staff");
+      if (!body.staff) throw new Error("Staff response was incomplete");
       onSubmit(body.staff);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not add staff");
