@@ -13,6 +13,7 @@ import {
   Plus,
   Settings,
   Square,
+  Trash2,
   Upload,
   UserRound,
   UsersRound,
@@ -244,6 +245,24 @@ export default function Dashboard({
     setStaffOpen(false);
     setToast(`${member.name} added to the team`);
   }
+  async function removeStaff(member: Staff) {
+    if (
+      !window.confirm(
+        `Remove ${member.name}? They will no longer receive new tasks.`,
+      )
+    )
+      return;
+    const response = await fetch(`/api/admin/staff/${member.id}`, {
+      method: "DELETE",
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setToast(body.error || "Staff member could not be removed");
+      return;
+    }
+    setStaff((current) => current.filter((person) => person.id !== member.id));
+    setToast(`${member.name} removed`);
+  }
   return (
     <main className="shell">
       <SessionExpiry expiresAt={expiresAt} />
@@ -297,7 +316,7 @@ export default function Dashboard({
             onOpenTask={setSelectedTask}
           />
         )}{" "}
-        {view === "staff" && <StaffPage staff={staff} />}{" "}
+        {view === "staff" && <StaffPage staff={staff} onRemove={removeStaff} />}{" "}
         {view === "history" && (
           <HistoryPage tasks={tasks} onOpenTask={setSelectedTask} />
         )}{" "}
@@ -368,23 +387,40 @@ export default function Dashboard({
   );
 }
 function Logout({ csrf, avatar }: { csrf: string; avatar?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  async function signOut(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    try {
+      const body = new FormData(event.currentTarget),
+        response = await fetch("/logout", {
+          method: "POST",
+          body,
+          credentials: "same-origin",
+        });
+      if (!response.ok) throw new Error("Sign out failed");
+      localStorage.removeItem("gb_authenticated");
+      window.location.replace("/login");
+    } catch {
+      setBusy(false);
+      window.location.assign("/login");
+    }
+  }
   return (
-    <form
-      action="/logout"
-      method="post"
-      onSubmit={() => localStorage.removeItem("gb_authenticated")}
-    >
+    <form action="/logout" method="post" onSubmit={signOut}>
       <input type="hidden" name="csrf" value={csrf} />
       <button
         className={
           avatar ? "btn btn-secondary logout-compact" : "btn btn-secondary"
         }
         type="submit"
+        disabled={busy}
         aria-label="Sign out"
         title="Sign out"
       >
         {avatar && <LogOut size={17} aria-hidden="true" />}
-        <span>Sign out</span>
+        <span>{busy ? "Signing out…" : "Sign out"}</span>
       </button>
     </form>
   );
@@ -516,7 +552,13 @@ function Today({
     </>
   );
 }
-function StaffPage({ staff }: { staff: Staff[] }) {
+function StaffPage({
+  staff,
+  onRemove,
+}: {
+  staff: Staff[];
+  onRemove: (member: Staff) => Promise<void>;
+}) {
   return (
     <section>
       <div className="mini-stats">
@@ -541,6 +583,10 @@ function StaffPage({ staff }: { staff: Staff[] }) {
       <div>
         {staff.length ? (
           <ChromaGrid
+            onRemove={(id) => {
+              const member = staff.find((person) => person.id === id);
+              return member ? onRemove(member) : Promise.resolve();
+            }}
             items={staff.map((s) => ({
               id: s.id,
               staffCode: s.staffCode,
@@ -739,15 +785,6 @@ function SettingsPage({
         </button>
       </section>
       <ManagementAccess notify={notify} />
-      <section className="card settings-card integration-card">
-        <span className="eyebrow">WHATSAPP</span>
-        <h2>Development mode</h2>
-        <p>
-          Real messages remain safely disabled until approved Meta templates and
-          production credentials are configured.
-        </p>
-        <span className="status attention">Setup needed</span>
-      </section>
     </div>
   );
 }
@@ -797,6 +834,29 @@ function ManagementAccess({ notify }: { notify: (value: string) => void }) {
       setBusy(false);
     }
   }
+  async function remove(member: ManagementMember) {
+    if (!window.confirm(`Remove dashboard access for ${member.name}?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/management", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: member.id }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(body.error || "Access could not be removed");
+      setMembers((current) => current.filter((item) => item.id !== member.id));
+      notify(`${member.name}'s access removed`);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Access could not be removed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <section className="card settings-card integration-card">
       <span className="eyebrow">GOOGLE ACCESS</span>
@@ -807,9 +867,22 @@ function ManagementAccess({ notify }: { notify: (value: string) => void }) {
       </p>
       <div className="department-list">
         {members.map((member) => (
-          <span key={member.id}>
-            {member.name} · {member.email} · {member.role}
-          </span>
+          <div className="management-member" key={member.id}>
+            <span>
+              {member.name} · {member.email} · {member.role}
+            </span>
+            {member.role !== "owner" && (
+              <button
+                type="button"
+                onClick={() => void remove(member)}
+                disabled={busy}
+                aria-label={`Remove ${member.name}'s access`}
+                title="Remove access"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
         ))}
       </div>
       <form className="form" onSubmit={approve}>

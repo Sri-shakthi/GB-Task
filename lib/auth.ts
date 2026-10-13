@@ -250,6 +250,15 @@ export async function clearOwnerSession(payload?: OwnerSession | null) {
     }
   }
   await neonAuth.signOut();
+  const cookieStore = await cookies();
+  for (const name of [
+    "__Secure-neon-auth.session_token",
+    "__Secure-neon-auth.local.session_data",
+    "__Secure-neon-auth.session_challenge",
+    "__Secure-neon-auth.session_challange",
+    SESSION_COOKIE,
+  ])
+    cookieStore.delete(name);
 }
 export function csrfToken(session: OwnerSession) {
   return createHmac("sha256", secret())

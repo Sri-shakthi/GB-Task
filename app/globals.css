@@ -1715,6 +1715,33 @@ h2,
   padding: 7px 9px;
   border-radius: 8px;
 }
+.management-member {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #f0f3f0;
+  font-size: 11px;
+}
+.management-member > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.management-member button {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #e7c8c3;
+  border-radius: 8px;
+  background: #fff8f7;
+  color: #a33b32;
+}
 .inline-add {
   display: flex;
   gap: 8px;

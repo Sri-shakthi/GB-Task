@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { authAuditEvents, owners } from "@/db/schema";
@@ -22,14 +22,21 @@ export async function GET() {
       active: owners.active,
     })
     .from(owners)
-    .where(eq(owners.restaurantId, session.restaurantId))
+    .where(
+      and(
+        eq(owners.restaurantId, session.restaurantId),
+        eq(owners.active, true),
+      ),
+    )
     .orderBy(owners.name);
   return Response.json({ members });
 }
 
 export async function POST(request: Request) {
-  const origin = request.headers.get("origin");
-  if (origin !== new URL(request.url).origin)
+  const origin = request.headers.get("origin"),
+    host =
+      request.headers.get("x-forwarded-host") || request.headers.get("host");
+  if (origin && host && new URL(origin).host !== host)
     return Response.json({ error: "Invalid origin" }, { status: 403 });
   const session = await getOwnerSession();
   if (!session)
@@ -88,4 +95,70 @@ export async function POST(request: Request) {
     metadata: { approvedEmail: email, memberId: member.id },
   });
   return Response.json({ member }, { status: 201 });
+}
+
+export async function DELETE(request: Request) {
+  const origin = request.headers.get("origin"),
+    host =
+      request.headers.get("x-forwarded-host") || request.headers.get("host");
+  if (origin && host && new URL(origin).host !== host)
+    return Response.json({ error: "Invalid origin" }, { status: 403 });
+  const session = await getOwnerSession();
+  if (!session)
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const input = z
+    .object({ id: z.string().uuid() })
+    .safeParse(await request.json().catch(() => null));
+  if (!input.success)
+    return Response.json({ error: "Invalid member" }, { status: 400 });
+  const db = getDb(),
+    [actor] = await db
+      .select({ role: owners.role })
+      .from(owners)
+      .where(
+        and(
+          eq(owners.id, session.ownerId),
+          eq(owners.restaurantId, session.restaurantId),
+          eq(owners.active, true),
+        ),
+      )
+      .limit(1);
+  if (actor?.role !== "owner")
+    return Response.json(
+      { error: "Only an owner can remove management access" },
+      { status: 403 },
+    );
+  if (input.data.id === session.ownerId)
+    return Response.json(
+      { error: "You cannot remove your own access" },
+      { status: 400 },
+    );
+  const [member] = await db
+    .update(owners)
+    .set({
+      active: false,
+      sessionVersion: sql`${owners.sessionVersion} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(owners.id, input.data.id),
+        eq(owners.restaurantId, session.restaurantId),
+        eq(owners.role, "manager"),
+        eq(owners.active, true),
+      ),
+    )
+    .returning({ id: owners.id, email: owners.email });
+  if (!member)
+    return Response.json(
+      { error: "Active management member not found" },
+      { status: 404 },
+    );
+  await db.insert(authAuditEvents).values({
+    ownerId: session.ownerId,
+    restaurantId: session.restaurantId,
+    event: "management_access_removed",
+    metadata: { removedEmail: member.email, memberId: member.id },
+  });
+  return Response.json({ removed: true });
 }

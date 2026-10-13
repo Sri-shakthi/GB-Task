@@ -3,11 +3,12 @@
 import {
   useEffect,
   useRef,
+  useState,
   type CSSProperties,
   type PointerEvent,
 } from "react";
 import { gsap } from "gsap";
-import { MapPin, MessageCircle, UserRound } from "lucide-react";
+import { MapPin, MessageCircle, Trash2, UserRound } from "lucide-react";
 import "./chroma-grid.css";
 
 export type ChromaStaffItem = {
@@ -28,15 +29,18 @@ export default function ChromaGrid({
   radius = 260,
   damping = 0.45,
   fadeOut = 0.6,
+  onRemove,
 }: {
   items: ChromaStaffItem[];
   radius?: number;
   damping?: number;
   fadeOut?: number;
+  onRemove?: (id: string | number) => Promise<void>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const fadeRef = useRef<HTMLDivElement>(null);
   const pos = useRef({ x: 0, y: 0 });
+  const [removing, setRemoving] = useState<string | number | null>(null);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -140,6 +144,24 @@ export default function ChromaGrid({
                 </span>
               )}
             </div>
+            {onRemove && (
+              <button
+                className="staff-remove"
+                type="button"
+                disabled={removing === person.id}
+                onClick={async () => {
+                  setRemoving(person.id);
+                  try {
+                    await onRemove(person.id);
+                  } finally {
+                    setRemoving(null);
+                  }
+                }}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                {removing === person.id ? "Removing…" : "Remove staff"}
+              </button>
+            )}
           </div>
         </article>
       ))}
