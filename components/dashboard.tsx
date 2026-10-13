@@ -154,7 +154,6 @@ export default function Dashboard({
     ).length,
   };
   useEffect(() => {
-    void fetch("/api/auth/rotate", { method: "POST" });
     void fetch("/api/admin/staff")
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
@@ -191,7 +190,9 @@ export default function Dashboard({
       }
     };
     void load();
-    const timer = setInterval(load, 10_000);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 30_000);
     const refresh = () => void load();
     window.addEventListener("focus", refresh);
     return () => {

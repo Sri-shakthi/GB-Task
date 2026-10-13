@@ -42,14 +42,22 @@ export async function GET() {
   const ids = rows.map((row) => row.assignment.id);
   const messages = ids.length
     ? await db
-        .select()
+        .select({
+          assignmentId: whatsappMessages.assignmentId,
+          status: whatsappMessages.status,
+          updatedAt: whatsappMessages.updatedAt,
+        })
         .from(whatsappMessages)
         .where(inArray(whatsappMessages.assignmentId, ids))
         .orderBy(desc(whatsappMessages.updatedAt))
     : [];
   const events = ids.length
     ? await db
-        .select()
+        .select({
+          assignmentId: assignmentEvents.assignmentId,
+          type: assignmentEvents.type,
+          createdAt: assignmentEvents.createdAt,
+        })
         .from(assignmentEvents)
         .where(inArray(assignmentEvents.assignmentId, ids))
         .orderBy(desc(assignmentEvents.createdAt))

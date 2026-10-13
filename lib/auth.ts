@@ -228,18 +228,26 @@ export async function getOwnerSession() {
     exp: new Date(session.expiresAt).getTime(),
   } satisfies OwnerSession;
 }
-export async function clearOwnerSession() {
-  const payload = await getOwnerSession();
+export async function clearOwnerSession(payload?: OwnerSession | null) {
+  payload ??= await getOwnerSession();
   if (payload) {
-    const meta = await requestMeta(),
-      db = getDb();
-    await db.insert(authAuditEvents).values({
-      ownerId: payload.ownerId,
-      restaurantId: payload.restaurantId,
-      event: "logout",
-      ipHash: meta.ipHash,
-      userAgentHash: meta.userAgentHash,
-    });
+    try {
+      const meta = await requestMeta(),
+        db = getDb();
+      await db.insert(authAuditEvents).values({
+        ownerId: payload.ownerId,
+        restaurantId: payload.restaurantId,
+        event: "logout",
+        ipHash: meta.ipHash,
+        userAgentHash: meta.userAgentHash,
+      });
+    } catch (error) {
+      // An audit write must never prevent the user's session from being
+      // cleared. Keep only the failure type out of the response.
+      console.error("Logout audit failed", {
+        name: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
   }
   await neonAuth.signOut();
 }
