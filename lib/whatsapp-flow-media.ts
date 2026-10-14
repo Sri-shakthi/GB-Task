@@ -195,7 +195,9 @@ function decode(value: string) {
 }
 
 function verifyHash(bytes: Buffer, encoded: string, label: string) {
-  const expected = decode(encoded),
+  const expected = /^[a-f\d]{64}$/i.test(encoded)
+      ? Buffer.from(encoded, "hex")
+      : decode(encoded),
     actual = createHash("sha256").update(bytes).digest();
   if (!safeEqual(actual, expected))
     throw new Error(`Flow photo ${label} hash did not match`);
