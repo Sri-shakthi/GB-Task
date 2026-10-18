@@ -37,9 +37,12 @@ JOB_WORKER_URL=https://YOUR-VERCEL-DOMAIN/api/cron/jobs
 CRON_SECRET=the-same-value-as-in-Vercel
 ```
 
-The scheduler exits after each call. Railway Hobby cron jobs run no more often
-than every five minutes; this is only a retry fallback, not the normal delivery
-path.
+The scheduler exits after each call. Railway will therefore log `Starting
+Container` for every scheduled invocation; this is the expected cron lifecycle,
+not a crash or restart loop. Treat a non-2xx `Worker trigger` response or a
+non-zero deployment result as a failure. Railway Hobby cron jobs run no more
+often than every five minutes; this is only a retry fallback, not the normal
+delivery path.
 
 ## Production on an Oracle VM
 

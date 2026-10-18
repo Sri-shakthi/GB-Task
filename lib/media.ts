@@ -28,7 +28,9 @@ export async function prepareTaskVideo(input: {
       "x-task-title": input.title.slice(0, 240),
     },
     body: bytes,
-    signal: AbortSignal.timeout(180_000),
+    // Leave enough time for the worker to persist a retry before Vercel's
+    // 120-second function deadline.
+    signal: AbortSignal.timeout(90_000),
   });
   if (!response.ok)
     throw new Error(`Media processor failed (${response.status})`);

@@ -13,6 +13,7 @@ import {
 import { prepareTaskVideo } from "./media";
 import { sendTask, uploadVideoToMeta } from "./whatsapp";
 import { storeFlowPhoto, type FlowPhoto } from "./whatsapp-flow-media";
+import { safeErrorMessage } from "./safe-error";
 type Payload = {
   recordingPath?: string;
   recordingId?: string;
@@ -48,7 +49,7 @@ export async function processDueJobs(limit = 5) {
           // FFmpeg can take longer than an ordinary API call. Keep the lease
           // beyond the processor timeout so a second worker cannot duplicate
           // an in-progress conversion.
-          leaseUntil: new Date(Date.now() + 240_000),
+          leaseUntil: new Date(Date.now() + 120_000),
           updatedAt: new Date(),
         })
         .where(eq(jobs.id, job.id));
@@ -118,7 +119,7 @@ export async function processDueJobs(limit = 5) {
           status,
           attempts,
           leaseUntil: null,
-          lastError: safeError(error),
+          lastError: safeErrorMessage(error),
           runAfter: new Date(Date.now() + Math.min(60, 2 ** attempts) * 60_000),
           updatedAt: new Date(),
         })
@@ -308,9 +309,4 @@ async function send(jobId: string, assignmentId: string, payload: Payload) {
       })
       .where(eq(jobs.id, jobId));
   });
-}
-function safeError(error: unknown) {
-  return (error instanceof Error ? error.message : "Unknown job error")
-    .replace(/\+?\d[\d\s-]{7,}/g, "[redacted-phone]")
-    .slice(0, 1000);
 }

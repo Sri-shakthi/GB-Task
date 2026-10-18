@@ -8,7 +8,9 @@ if (!endpoint || !secret) {
   try {
     const response = await fetch(endpoint, {
       headers: { authorization: `Bearer ${secret}` },
-      signal: AbortSignal.timeout(240_000),
+      // Vercel stops the target function at 120 seconds. Give this caller a
+      // small margin so a timeout is reported accurately by the scheduler.
+      signal: AbortSignal.timeout(115_000),
     });
     const body = await response.text();
     console.log(`Worker trigger ${response.status}: ${body}`);
