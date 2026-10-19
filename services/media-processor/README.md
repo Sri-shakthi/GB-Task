@@ -39,10 +39,12 @@ CRON_SECRET=the-same-value-as-in-Vercel
 
 The scheduler exits after each call. Railway will therefore log `Starting
 Container` for every scheduled invocation; this is the expected cron lifecycle,
-not a crash or restart loop. Treat a non-2xx `Worker trigger` response or a
-non-zero deployment result as a failure. Railway Hobby cron jobs run no more
-often than every five minutes; this is only a retry fallback, not the normal
-delivery path.
+not a crash or restart loop. The wrapper retries transient HTTP 5xx and network
+errors three times, then exits successfully so Railway keeps the next scheduled
+run active. HTTP 4xx responses and missing configuration still exit non-zero
+because they require operator action. Railway Hobby cron jobs run no more often
+than every five minutes; this is only a retry fallback, not the normal delivery
+path.
 
 ## Production on an Oracle VM
 
